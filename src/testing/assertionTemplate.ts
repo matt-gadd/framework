@@ -1,6 +1,7 @@
 import select from './support/selector';
 import { isWNode, isVNode, decorate } from '../widget-core/d';
 import { VNode, WNode, DNode } from '../widget-core/interfaces';
+import WidgetBase from '../widget-core/WidgetBase';
 
 export interface AssertionTemplateResult {
 	(): DNode | DNode[];
@@ -12,8 +13,10 @@ export interface AssertionTemplateResult {
 	insertSiblings(selector: string, children: DNode[], type?: 'before' | 'after'): AssertionTemplateResult;
 	setChildren(selector: string, children: DNode[], type?: 'prepend' | 'replace' | 'append'): AssertionTemplateResult;
 	setProperty(selector: string, property: string, value: any): AssertionTemplateResult;
+	setProperties(selector: string, value: any): AssertionTemplateResult;
 	getChildren(selector: string): DNode[];
 	getProperty(selector: string, property: string): any;
+	getProperties(selector: string): any;
 }
 
 const findOne = (nodes: DNode | DNode[], selector: string): DNode | undefined => {
@@ -41,6 +44,8 @@ const guard = (node: DNode): NodeWithProperties => {
 	return node;
 };
 
+export class Mimic extends WidgetBase {}
+
 export function assertionTemplate(renderFunc: () => DNode | DNode[]) {
 	const assertionTemplateResult: any = () => {
 		const render = renderFunc();
@@ -57,6 +62,14 @@ export function assertionTemplate(renderFunc: () => DNode | DNode[]) {
 			const render = renderFunc();
 			const node = guard(findOne(render, selector));
 			node.properties[property] = value;
+			return render;
+		});
+	};
+	assertionTemplateResult.setProperties = (selector: string, properties: any) => {
+		return assertionTemplate(() => {
+			const render = renderFunc();
+			const node = guard(findOne(render, selector));
+			node.properties = properties;
 			return render;
 		});
 	};
@@ -126,6 +139,11 @@ export function assertionTemplate(renderFunc: () => DNode | DNode[]) {
 		const render = renderFunc();
 		const node = guard(findOne(render, selector));
 		return node.properties[property];
+	};
+	assertionTemplateResult.getProperties = (selector: string, property: string) => {
+		const render = renderFunc();
+		const node = guard(findOne(render, selector));
+		return node.properties;
 	};
 	assertionTemplateResult.getChildren = (selector: string) => {
 		const render = renderFunc();
