@@ -11,8 +11,13 @@ export interface ResourceOptions {
 export type ResourceQuery = { keys: string[]; value: string | undefined };
 
 export interface Resource<S = {}, T = {}> {
-	(): Resource<S>;
-	<T>(transform?: TransformConfig<T, S>): Resource<T, T>;
+	(): { resource: Resource<S, T>; transform: any; data: any; type: string };
+	<T>(options: { transform?: TransformConfig<T, S>; data?: S[] }): {
+		resource: Resource<T, T>;
+		transform: any;
+		data: S[];
+		type: string;
+	};
 	getOrRead(options: ResourceOptions): any;
 	get(options: ResourceOptions): any;
 	getTotal(options: ResourceOptions): number | undefined;
@@ -312,10 +317,13 @@ export function createResource<S>(config: DataTemplate<S> = createMemoryTemplate
 		}
 	}
 
-	function resource(data: any[]) {
+	function resource(options: { transform: any; data: any[] }) {
+		const { data, transform } = options;
 		return {
 			resource,
-			data
+			data,
+			transform,
+			type: 'RESOURCE'
 		};
 	}
 

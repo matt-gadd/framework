@@ -1,7 +1,6 @@
 import { create, invalidator, destroy, diffProperty } from '../vdom';
 import { Resource, ResourceOptions, ResourceQuery, TransformConfig } from '../resource';
 import { Invalidator } from '../interfaces';
-import { string } from '../../shim/main';
 
 type Query = { [key: string]: string | undefined };
 
@@ -19,17 +18,19 @@ interface OptionsWrapper {
 interface ResourceWrapper {
 	resource: Resource;
 	createOptionsWrapper(): OptionsWrapper;
+	transformer: any;
 }
 
 interface ResourceWithData {
 	resource: Resource;
+	transform: any;
 	data: any[];
 }
 
 export type ResourceOrResourceWrapper = Resource | ResourceWrapper | ResourceWithData;
 
 export interface DataTransformProperties<T = void> {
-	resource: T extends infer R ? Resource<R, T> : any;
+	resource: T extends infer R ? { resource: Resource<R, T>; transform: any; data: any } : any;
 }
 
 export interface DataInitialiserOptions {
@@ -40,10 +41,6 @@ export interface DataInitialiserOptions {
 
 function isResource(resourceWrapperOrResource: any): resourceWrapperOrResource is Resource {
 	return !!(resourceWrapperOrResource as any).getOrRead;
-}
-
-function isDataTransformProperties<T>(properties: any): properties is DataTransformProperties<T> {
-	return !!properties.transform;
 }
 
 function createOptionsWrapper(): OptionsWrapper {
@@ -72,9 +69,10 @@ function createOptionsWrapper(): OptionsWrapper {
 	};
 }
 
-function createResourceWrapper(resource: Resource, options?: OptionsWrapper): ResourceWrapper {
+function createResourceWrapper(resource: Resource, transformer?: any, options?: OptionsWrapper): ResourceWrapper {
 	return {
 		resource,
+		transformer,
 		createOptionsWrapper: options ? () => options : createOptionsWrapper
 	};
 }
@@ -83,16 +81,14 @@ function isResourceWithData(resource: any): resource is ResourceWithData {
 	return resource && !!resource.data;
 }
 
-function createResourceOptions(options: Options, properties: DataTransformProperties): ResourceOptions {
+function createResourceOptions(options: Options, resource: any): ResourceOptions {
 	if (options.query) {
 		let query: ResourceQuery[] = [];
-		if (isDataTransformProperties(properties)) {
-			const newProperties: DataTransformProperties<any> = properties;
-			query = transformQuery(options.query, newProperties.transform);
+		if (resource.transform) {
+			query = transformQuery(options.query, resource.transform);
 		} else {
 			query = transformQuery(options.query);
 		}
-
 		return {
 			...options,
 			query
@@ -145,6 +141,9 @@ export function createDataMiddleware<T = void>() {
 	const data = factory(({ middleware: { invalidator, destroy, diffProperty }, properties }) => {
 		const optionsWrapperMap = new Map<Resource, Map<string, OptionsWrapper>>();
 		const resourceWithDataMap = new Map<T[], Resource>();
+		const {
+			resource: { transform }
+		} = properties();
 
 		destroy(() => {
 			[...optionsWrapperMap.keys()].forEach((resource) => {
@@ -183,13 +182,13 @@ export function createDataMiddleware<T = void>() {
 			let resourceWrapper: ResourceWrapper;
 
 			if (isResource(resourceWrapperOrResource)) {
-				resourceWrapper = createResourceWrapper(resourceWrapperOrResource);
+				resourceWrapper = createResourceWrapper(resourceWrapperOrResource, transform);
 			} else {
 				resourceWrapper = resourceWrapperOrResource as ResourceWrapper;
 			}
 
 			if (dataOptions.reset) {
-				resourceWrapper = createResourceWrapper(resourceWrapper.resource);
+				resourceWrapper = createResourceWrapper(resourceWrapper.resource, transform);
 			}
 
 			const { resource } = resourceWrapper;
@@ -214,48 +213,58 @@ export function createDataMiddleware<T = void>() {
 
 			return {
 				getOrRead(options: Options): T extends void ? any : T[] | undefined {
-					const props = properties();
-					const resourceOptions = createResourceOptions(options, props);
+					const { resource: resourceContainer } = properties();
+					const { transform, resource } = resourceContainer;
+
+					const resourceOptions = createResourceOptions(options, resourceContainer);
 
 					resource.subscribe('data', resourceOptions, invalidator);
 
 					const data = resource.getOrRead(resourceOptions);
 
-					if (data && data.length && isDataTransformProperties(props)) {
-						return data.map((item: any) => transformData(item, props.transform));
+					if (data && data.length && transform) {
+						return data.map((item: any) => transformData(item, transform));
 					}
 
 					return data;
 				},
 				get(options: Options): T extends void ? any : T[] | undefined {
-					const props = properties();
-					const resourceOptions = createResourceOptions(options, props);
+					const { resource: resourceContainer } = properties();
+					const { transform, resource } = resourceContainer;
+
+					const resourceOptions = createResourceOptions(options, resourceContainer);
 
 					const data = resource.get(resourceOptions);
 
-					if (data && data.length && isDataTransformProperties(props)) {
-						return data.map((item: any) => transformData(item, props.transform));
+					if (data && data.length && transform) {
+						return data.map((item: any) => transformData(item, transform));
 					}
 
 					return data;
 				},
 				getTotal(options: Options) {
-					const props = properties();
-					const resourceOptions = createResourceOptions(options, props);
+					const { resource: resourceContainer } = properties();
+					const { resource } = resourceContainer;
+
+					const resourceOptions = createResourceOptions(options, resourceContainer);
 
 					resource.subscribe('total', resourceOptions, invalidator);
 					return resource.getTotal(resourceOptions);
 				},
 				isLoading(options: Options) {
-					const props = properties();
-					const resourceOptions = createResourceOptions(options, props);
+					const { resource: resourceContainer } = properties();
+					const { resource } = resourceContainer;
+
+					const resourceOptions = createResourceOptions(options, resourceContainer);
 
 					resource.subscribe('loading', resourceOptions, invalidator);
 					return resource.isLoading(resourceOptions);
 				},
 				isFailed(options: Options) {
-					const props = properties();
-					const resourceOptions = createResourceOptions(options, props);
+					const { resource: resourceContainer } = properties();
+					const { resource } = resourceContainer;
+
+					const resourceOptions = createResourceOptions(options, resourceContainer);
 
 					resource.subscribe('failed', resourceOptions, invalidator);
 					return resource.isFailed(resourceOptions);
@@ -270,7 +279,7 @@ export function createDataMiddleware<T = void>() {
 					return resourceWrapper;
 				},
 				shared() {
-					return createResourceWrapper(resource, optionsWrapper);
+					return createResourceWrapper(resource, transform, optionsWrapper);
 				}
 			};
 		};

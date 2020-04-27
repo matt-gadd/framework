@@ -29,8 +29,6 @@ const factory = create({ data: createDataMiddleware<{ cool: string }>() });
 
 const Thing = factory(({ middleware: { data } }) => {
 	const { getOrRead, getOptions } = data();
-	const f = getOrRead(getOptions());
-	console.log(f![0].value);
 	return <div>{JSON.stringify(getOrRead(getOptions()))}</div>;
 });
 
@@ -39,22 +37,35 @@ const resource2 = createResource<{ hello: string; foo: boolean }>();
 
 const Another = create()(() => {
 	// should work (factory)
-	const a = <Thing resource={resource()} />;
+	const a = <Thing resource={resource({ data: [{ cool: 'good', foo: 'boy' }] })} />;
 
 	// shouldn't work (factory)
 	const b = <Thing resource={resource2()} />;
 
 	// should work, transform to right value
-	const c = <Thing resource={resource({ cool: ['foo'] })} />;
+	const c = <Thing resource={resource({ transform: { cool: ['foo'] } })} />;
 
-	// shouldn't work, transform is to wrong value
-	const d = <Thing resource={resource({ wrong: ['foo'] })} />;
+	// shouldn't work, transform is to wrong value left side
+	const d = <Thing resource={resource({ transform: { wrong: ['foo'] } })} />;
 
-	// shouldn't work, transform is to wrong value
-	const e = <Thing resource={resource2({ lol: ['l'] })} />;
+	// shouldn't work, transform is to wrong value right side
+	const e = <Thing resource={resource2({ transform: { lol: ['l'] } })} />;
 
 	// should work, transform is to right value
-	const f = <Thing resource={resource2({ cool: ['foo'] })} />;
+	const f = <Thing resource={resource2({ transform: { cool: ['foo'] } })} />;
+
+	// should work, transform is to right value
+	const g = (
+		<Thing
+			resource={resource2({
+				transform: { cool: ['foo'] },
+				data: [{ hello: 'world', foo: true }]
+			})}
+		/>
+	);
+
+	// shouldn't work, need to pass factory
+	const h = <Thing resource={resource} />;
 });
 
 console.log(Another);
@@ -68,127 +79,130 @@ jsdomDescribe('data middleware', () => {
 		sb.resetHistory();
 	});
 
-	it('should return default API with options', () => {
-		const { callback } = dataMiddleware();
-		const data = callback({
-			id: 'test',
-			middleware: {
-				invalidator: invalidatorStub,
-				destroy: destroyStub,
-				diffProperty: diffPropertyStub
-			},
-			properties: () => ({
-				resource: resourceStub
-			}),
-			children: () => []
-		});
-
-		resourceStub.getOrRead.returns('test');
-		const { getOrRead, getOptions } = data();
-		const result = getOrRead(getOptions());
-		assert.equal(result, 'test');
-	});
-
-	it('can call get with options', () => {
-		const { callback } = dataMiddleware();
-		const data = callback({
-			id: 'test',
-			middleware: {
-				invalidator: invalidatorStub,
-				destroy: destroyStub,
-				diffProperty: diffPropertyStub
-			},
-			properties: () => ({
-				resource: resourceStub
-			}),
-			children: () => []
-		});
-
-		resourceStub.get.returns('test');
-		const { get, getOptions } = data();
-		const result = get(getOptions());
-		assert.equal(result, 'test');
-	});
-
-	it('should invalidate when new options are set', () => {
-		const { callback } = dataMiddleware();
-		const data = callback({
-			id: 'test',
-			middleware: {
-				invalidator: invalidatorStub,
-				destroy: destroyStub,
-				diffProperty: diffPropertyStub
-			},
-			properties: () => ({
-				resource: resourceStub
-			}),
-			children: () => []
-		});
-
-		let { setOptions, getOptions } = data();
-		setOptions({
-			pageNumber: 2,
-			pageSize: 15
-		});
-		assert.isTrue(invalidatorStub.calledOnce);
-		const options = getOptions();
-		assert.equal(options.pageNumber, 2);
-		assert.equal(options.pageSize, 15);
-	});
-
-	it('should transform getOrRead response when using createDataMiddleware', () => {
-		resourceStub.getOrRead.returns([{ item: 'foo' }, { item: 'bar' }]);
-		const factory = create({ data: createDataMiddleware<{ value: string }>() });
-		const App = factory(function App({ middleware: { data } }) {
-			const { getOrRead, getOptions } = data();
-			return <div>{JSON.stringify(getOrRead(getOptions()))}</div>;
-		});
+	it('get() with options', () => {
 		const root = document.createElement('div');
-		const r = renderer(() => <App resource={resourceStub} transform={{ value: ['item'] }} />);
-		r.mount({ domNode: root });
-		assert.strictEqual(root.innerHTML, `<div>${JSON.stringify([{ value: 'foo' }, { value: 'bar' }])}</div>`);
-	});
+		const factory = create({ data: createDataMiddleware<{ hello: string }>() });
 
-	it('should concat multiple sources into a single response field where appropriate', () => {
-		resourceStub.getOrRead.returns([{ a: 'foo', b: 'b' }, { a: 'bar', b: 'b' }]);
-		const factory = create({ data: createDataMiddleware<{ value: string }>() });
-		const App = factory(function App({ middleware: { data } }) {
-			const { getOrRead, getOptions } = data();
-			return <div>{JSON.stringify(getOrRead(getOptions()))}</div>;
-		});
-		const root = document.createElement('div');
-		const r = renderer(() => <App resource={resourceStub} transform={{ value: ['a', 'b'] }} />);
-		r.mount({ domNode: root });
-		assert.strictEqual(root.innerHTML, `<div>${JSON.stringify([{ value: 'foo b' }, { value: 'bar b' }])}</div>`);
-	});
-
-	it('should not convert single sources into strings', () => {
-		resourceStub.getOrRead.returns([{ a: true, b: 2 }, { a: false, b: 3 }, { b: 4 }]);
-		const factory = create({ data: createDataMiddleware<{ value: string; foo: string }>() });
-		const App = factory(function App({ middleware: { data } }) {
-			const { getOrRead, getOptions } = data();
-			return <div>{JSON.stringify(getOrRead(getOptions()))}</div>;
-		});
-		const root = document.createElement('div');
-		const r = renderer(() => <App resource={resourceStub} transform={{ value: ['a'], foo: ['b'] }} />);
-		r.mount({ domNode: root });
-		assert.strictEqual(
-			root.innerHTML,
-			`<div>${JSON.stringify([{ value: true, foo: 2 }, { value: false, foo: 3 }, { foo: 4 }])}</div>`
-		);
-	});
-
-	it('should transform get response when using createDataMiddleware', () => {
-		resourceStub.get.returns([{ item: 'foo' }, { item: 'bar' }]);
-		const factory = create({ data: createDataMiddleware<{ value: string }>() });
-		const App = factory(function App({ middleware: { data } }) {
+		const Thing = factory(({ middleware: { data } }) => {
 			const { get, getOptions } = data();
 			return <div>{JSON.stringify(get(getOptions()))}</div>;
 		});
-		const root = document.createElement('div');
-		const r = renderer(() => <App resource={resourceStub} transform={{ value: ['item'] }} />);
+
+		const resource = createResource<{ hello: string }>();
+
+		const App = create()(() => {
+			return <Thing resource={resource({ data: [{ hello: '1' }] })} />;
+		});
+
+		const r = renderer(() => <App />);
 		r.mount({ domNode: root });
-		assert.strictEqual(root.innerHTML, `<div>${JSON.stringify([{ value: 'foo' }, { value: 'bar' }])}</div>`);
+		assert.strictEqual(root.innerHTML, `<div>${JSON.stringify([{ hello: '1' }])}</div>`);
+	});
+
+	it('should update when setOptions() called', () => {
+		const root = document.createElement('div');
+		const factory = create({ data: createDataMiddleware<{ hello: string }>() });
+
+		let set: any;
+		const Thing = factory(({ middleware: { data } }) => {
+			const { get, getOptions, setOptions } = data();
+			set = setOptions;
+			const { pageSize = 1, pageNumber = 1 } = getOptions();
+			setOptions({ pageSize, pageNumber });
+			return <div>{JSON.stringify(get(getOptions()))}</div>;
+		});
+
+		const resource = createResource<{ hello: string }>();
+
+		const App = create()(() => {
+			return <Thing resource={resource({ data: [{ hello: '1' }, { hello: '2' }] })} />;
+		});
+
+		const r = renderer(() => <App />);
+		r.mount({ domNode: root });
+		assert.strictEqual(root.innerHTML, `<div>${JSON.stringify([{ hello: '1' }])}</div>`);
+		set({ pageNumber: 2 });
+		resolvers.resolveRAF();
+		assert.strictEqual(root.innerHTML, `<div>${JSON.stringify([{ hello: '2' }])}</div>`);
+	});
+
+	it('should transform data', () => {
+		const root = document.createElement('div');
+		const factory = create({ data: createDataMiddleware<{ hello: string }>() });
+
+		const Thing = factory(({ middleware: { data } }) => {
+			const { get, getOptions, setOptions } = data();
+			const { pageSize = 1, pageNumber = 1 } = getOptions();
+			setOptions({ pageSize, pageNumber });
+			return <div>{JSON.stringify(get(getOptions()))}</div>;
+		});
+
+		const resource = createResource<{ wrong: string }>();
+
+		const App = create()(() => {
+			return (
+				<Thing
+					resource={resource({ transform: { hello: ['wrong'] }, data: [{ wrong: '1' }, { wrong: '2' }] })}
+				/>
+			);
+		});
+
+		const r = renderer(() => <App />);
+		r.mount({ domNode: root });
+		assert.strictEqual(root.innerHTML, `<div>${JSON.stringify([{ hello: '1' }])}</div>`);
+	});
+
+	it('should concat multiple fields when using a transform', () => {
+		const root = document.createElement('div');
+		const factory = create({ data: createDataMiddleware<{ hello: string }>() });
+
+		const Thing = factory(({ middleware: { data } }) => {
+			const { get, getOptions, setOptions } = data();
+			const { pageSize = 1, pageNumber = 1 } = getOptions();
+			setOptions({ pageSize, pageNumber });
+			return <div>{JSON.stringify(get(getOptions()))}</div>;
+		});
+
+		const resource = createResource<{ wrong: string; another: string }>();
+
+		const App = create()(() => {
+			return (
+				<Thing
+					resource={resource({
+						transform: { hello: ['wrong', 'another'] },
+						data: [{ wrong: '1', another: 'yay' }, { wrong: '2', another: 'yay 2' }]
+					})}
+				/>
+			);
+		});
+
+		const r = renderer(() => <App />);
+		r.mount({ domNode: root });
+		assert.strictEqual(root.innerHTML, `<div>${JSON.stringify([{ hello: '1 yay' }])}</div>`);
+	});
+
+	it('should not convert single fields into strings when using a transform', () => {
+		const root = document.createElement('div');
+		const factory = create({ data: createDataMiddleware<{ hello: number }>() });
+
+		const Thing = factory(({ middleware: { data } }) => {
+			const { get, getOptions, setOptions } = data();
+			const { pageSize = 1, pageNumber = 1 } = getOptions();
+			setOptions({ pageSize, pageNumber });
+			return <div>{JSON.stringify(get(getOptions()))}</div>;
+		});
+
+		const resource = createResource<{ wrong: number }>();
+
+		const App = create()(() => {
+			return (
+				<Thing resource={resource({ transform: { hello: ['wrong'] }, data: [{ wrong: 1 }, { wrong: 2 }] })} />
+			);
+		});
+
+		const r = renderer(() => <App />);
+		r.mount({ domNode: root });
+		assert.strictEqual(root.innerHTML, `<div>${JSON.stringify([{ hello: 1 }])}</div>`);
 	});
 
 	it('should transform appropriate query options when calling resource apis', () => {
