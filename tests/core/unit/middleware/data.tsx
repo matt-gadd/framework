@@ -5,7 +5,7 @@ import { sandbox } from 'sinon';
 import { renderer, tsx, create, invalidator } from '../../../../src/core/vdom';
 import dataMiddleware, { createDataMiddleware, ResourceOrResourceWrapper } from '../../../../src/core/middleware/data';
 import { createResolvers } from '../../support/util';
-import { Resource } from '../../../../src/core/resource';
+import { Resource, createResource } from '../../../../src/core/resource';
 
 const resolvers = createResolvers();
 
@@ -24,6 +24,40 @@ resourceStub.isLoading = sb.stub();
 resourceStub.isFailed = sb.stub();
 resourceStub.get = sb.stub();
 resourceStub.set = sb.stub();
+
+const factory = create({ data: createDataMiddleware<{ cool: string }>() });
+
+const Thing = factory(({ middleware: { data } }) => {
+	const { getOrRead, getOptions } = data();
+	const f = getOrRead(getOptions());
+	console.log(f![0].value);
+	return <div>{JSON.stringify(getOrRead(getOptions()))}</div>;
+});
+
+const resource = createResource<{ cool: string; foo: string }>();
+const resource2 = createResource<{ hello: string; foo: boolean }>();
+
+const Another = create()(() => {
+	// should work (factory)
+	const a = <Thing resource={resource()} />;
+
+	// shouldn't work (factory)
+	const b = <Thing resource={resource2()} />;
+
+	// should work, transform to right value
+	const c = <Thing resource={resource({ cool: ['foo'] })} />;
+
+	// shouldn't work, transform is to wrong value
+	const d = <Thing resource={resource({ wrong: ['foo'] })} />;
+
+	// shouldn't work, transform is to wrong value
+	const e = <Thing resource={resource2({ lol: ['l'] })} />;
+
+	// should work, transform is to right value
+	const f = <Thing resource={resource2({ cool: ['foo'] })} />;
+});
+
+console.log(Another);
 
 jsdomDescribe('data middleware', () => {
 	beforeEach(() => {

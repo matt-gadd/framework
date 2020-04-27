@@ -1,6 +1,7 @@
 import { create, invalidator, destroy, diffProperty } from '../vdom';
 import { Resource, ResourceOptions, ResourceQuery, TransformConfig } from '../resource';
 import { Invalidator } from '../interfaces';
+import { string } from '../../shim/main';
 
 type Query = { [key: string]: string | undefined };
 
@@ -27,13 +28,8 @@ interface ResourceWithData {
 
 export type ResourceOrResourceWrapper = Resource | ResourceWrapper | ResourceWithData;
 
-export interface DataProperties {
-	resource: ResourceOrResourceWrapper;
-}
-
 export interface DataTransformProperties<T = void> {
-	transform: TransformConfig<T>;
-	resource: ResourceOrResourceWrapper;
+	resource: T extends infer R ? Resource<R, T> : any;
 }
 
 export interface DataInitialiserOptions {
@@ -87,10 +83,7 @@ function isResourceWithData(resource: any): resource is ResourceWithData {
 	return resource && !!resource.data;
 }
 
-function createResourceOptions(
-	options: Options,
-	properties: DataProperties | DataTransformProperties
-): ResourceOptions {
+function createResourceOptions(options: Options, properties: DataTransformProperties): ResourceOptions {
 	if (options.query) {
 		let query: ResourceQuery[] = [];
 		if (isDataTransformProperties(properties)) {
@@ -147,9 +140,7 @@ function transformData<T>(item: any, transformConfig: TransformConfig<T>) {
 }
 
 export function createDataMiddleware<T = void>() {
-	const factory = create({ invalidator, destroy, diffProperty }).properties<
-		T extends void ? DataProperties : DataTransformProperties<T>
-	>();
+	const factory = create({ invalidator, destroy, diffProperty }).properties<DataTransformProperties<T>>();
 
 	const data = factory(({ middleware: { invalidator, destroy, diffProperty }, properties }) => {
 		const optionsWrapperMap = new Map<Resource, Map<string, OptionsWrapper>>();

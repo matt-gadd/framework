@@ -10,8 +10,9 @@ export interface ResourceOptions {
 
 export type ResourceQuery = { keys: string[]; value: string | undefined };
 
-export interface Resource<S = any> {
-	(data: S[]): { resource: Resource<S>; data: S[] };
+export interface Resource<S = {}, T = {}> {
+	(): Resource<S>;
+	<T>(transform?: TransformConfig<T, S>): Resource<T, T>;
 	getOrRead(options: ResourceOptions): any;
 	get(options: ResourceOptions): any;
 	getTotal(options: ResourceOptions): number | undefined;
