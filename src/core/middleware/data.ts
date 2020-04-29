@@ -21,9 +21,9 @@ interface ResourceWrapper {
 	transformer: any;
 }
 
-interface ResourceWithData {
+interface ResourceWithData<T> {
 	resource: Resource;
-	transform: any;
+	transform: T;
 	data: any[];
 }
 

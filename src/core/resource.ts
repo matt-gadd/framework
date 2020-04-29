@@ -12,7 +12,7 @@ export type ResourceQuery = { keys: string[]; value: string | undefined };
 
 export interface Resource<S = {}, T = {}> {
 	(): { resource: Resource<S, T>; transform: any; data: any; type: string };
-	<T>(options: { transform?: TransformConfig<T, S>; data?: S[] }): {
+	<T>(options: { transform?(data: S): T; data?: S[] }): {
 		resource: Resource<T, T>;
 		transform: any;
 		data: S[];
