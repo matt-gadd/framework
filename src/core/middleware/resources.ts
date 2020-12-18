@@ -65,6 +65,17 @@ export interface ResourceMeta {
 	total: number | undefined;
 }
 
+export interface MaxAge {
+	directive: 'max-age';
+	seconds: number;
+}
+
+export interface Immutable {
+	directive: 'immutable';
+}
+
+export type CacheControl = MaxAge | Immutable;
+
 export interface ResourceGet<RESOURCE> {
 	(request?: Partial<ResourceReadRequest<RESOURCE>>): ResourceReadResponse<RESOURCE>;
 }
@@ -92,11 +103,13 @@ export interface ResourceInit<RESOURCE, INIT> {
 }
 
 interface ResourceTemplate<RESOURCE = {}, MIDDLEWARE = {}> {
+	cacheControl?: CacheControl;
 	read: ResourceRead<RESOURCE>;
 	find: ResourceFind<RESOURCE>;
 }
 
 interface ResourceTemplateWithInit<RESOURCE = {}, INIT = any, MIDDLEWARE = {}> {
+	cacheControl?: CacheControl;
 	init: ResourceInit<RESOURCE, INIT>;
 	read: ResourceRead<RESOURCE>;
 	find: ResourceFind<RESOURCE>;
@@ -380,6 +393,7 @@ export function defaultFind(request: ResourceFindRequest<any>, { put, get }: Res
 }
 
 export const memoryTemplate: ResourceTemplateWithInit<any, { data: any }> = Object.freeze({
+	cacheControl: { directive: 'immutable' },
 	init: ({ data }, { put }) => {
 		put({ data, total: data.length }, { offset: 0, size: 30, query: {} });
 	},
@@ -513,7 +527,7 @@ function createResource<S = never, T extends ResourceInitOptions = ResourceInitO
 	template: ResourceTemplate<S> | ResourceTemplateWithInit<S>,
 	initOptions?: T
 ): Resource<S> {
-	const dataMap = new Map<string, S[]>();
+	const dataMap = new Map<string, { mtime?: number; data: S[] }>();
 	const metaMap = new Map<string, ResourceMeta>();
 	const statusMap = new Map<string, StatusType>();
 	const findMap = new Map<string, undefined | ResourceFindResult<S>>();
@@ -529,7 +543,7 @@ function createResource<S = never, T extends ResourceInitOptions = ResourceInitO
 
 	function get(request: Partial<ResourceReadRequest<S>> = {}) {
 		const dataKey = getDataKey(request);
-		const data = dataMap.get(dataKey) || [];
+		const { data } = dataMap.get(dataKey) || { data: [] };
 		return { data, total: data.length };
 	}
 
@@ -675,20 +689,20 @@ function createResource<S = never, T extends ResourceInitOptions = ResourceInitO
 		const { data, total } = response;
 		const { size, offset, query } = request;
 		const dataKey = getDataKey(request);
-		const cachedData = dataMap.get(dataKey) || [];
+		const cachedData = dataMap.get(dataKey) || { data: [] };
 		const maxItem = total ? total : offset + data.length;
 		for (let i = offset; i < maxItem; i += 1) {
 			if (data[i - offset] === undefined) {
 				break;
 			}
-			cachedData[i] = data[i - offset];
+			cachedData.data[i] = data[i - offset];
 		}
 		clearStatus(dataKey);
-		dataMap.set(dataKey, cachedData);
+		dataMap.set(dataKey, { mtime: Date.now(), data: cachedData.data });
 		const page = Math.floor(offset / size) + 1;
 		setMeta({ size, query, page }, total);
 		invalidate('read', getReadKey({ size, query, page }));
-		return cachedData.slice(offset, offset + size).filter(() => true);
+		return cachedData.data.slice(offset, offset + size).filter(() => true);
 	}
 
 	function setFind(response: ResourceFindResponse<S> | undefined, request: ResourceFindRequest<S>) {
@@ -708,20 +722,25 @@ function createResource<S = never, T extends ResourceInitOptions = ResourceInitO
 		invalidate('find', getFindKey(request));
 	}
 
-	function getCachedPageData(options: { page: number; size: number; query: ResourceQuery<S> }): S[] | undefined {
+	function getCachedPageData(options: {
+		page: number;
+		size: number;
+		query: ResourceQuery<S>;
+	}): { mtime?: number; data: S[] | undefined } {
 		const { size, page } = options;
 		const metaKey = getMetaKey(options);
 		const dataKey = getDataKey(options);
 		const requestedPages = requestPageMap.get(metaKey) || [];
-		const cachedData = dataMap.get(dataKey);
-		if (cachedData) {
+		const cachedData = dataMap.get(dataKey) || { data: [] };
+		if (cachedData.data.length) {
 			const offset = (page - 1) * size;
-			const requestedCachedData = cachedData.slice(offset, offset + size).filter(() => true);
-			setMeta(options, cachedData.length);
+			const requestedCachedData = cachedData.data.slice(offset, offset + size).filter(() => true);
+			setMeta(options, cachedData.data.length);
 			if (requestedCachedData.length === size || requestedPages.indexOf(page) !== -1) {
-				return requestedCachedData;
+				return { mtime: cachedData.mtime, data: requestedCachedData };
 			}
 		}
+		return { data: undefined };
 	}
 
 	function getOrRead(options: ResourceOptions<S>): (undefined | S[])[] {
@@ -743,8 +762,17 @@ function createResource<S = never, T extends ResourceInitOptions = ResourceInitO
 			}
 
 			const cachedData = getCachedPageData({ size, query, page });
-			if (cachedData) {
-				getOrReadResponse.push(cachedData);
+			if (
+				cachedData.mtime &&
+				template.cacheControl &&
+				(template.cacheControl.directive === 'max-age' &&
+					cachedData.mtime - Date.now() + template.cacheControl.seconds * 1000 < 0)
+			) {
+				cachedData.data = [];
+			}
+
+			if (cachedData.data && cachedData.data.length) {
+				getOrReadResponse.push(cachedData.data);
 				continue;
 			}
 
@@ -775,7 +803,7 @@ function createResource<S = never, T extends ResourceInitOptions = ResourceInitO
 						invalidate('failed', getReadKey({ size, page, query }));
 					});
 			} else {
-				getOrReadResponse.push(getCachedPageData({ size, query, page }));
+				getOrReadResponse.push(getCachedPageData({ size, query, page }).data);
 			}
 		}
 		if (promises.length) {

@@ -1,7 +1,7 @@
 const { it, afterEach, beforeEach } = intern.getInterface('bdd');
 const { describe } = intern.getPlugin('jsdom');
 const { assert } = intern.getPlugin('chai');
-import { renderer, tsx, create } from '../../../../src/core/vdom';
+import { renderer, tsx, create, invalidator } from '../../../../src/core/vdom';
 import testRenderer, { assertion } from '../../../../src/testing/renderer';
 import Map from '../../../../src/shim/Map';
 import '../../../../src/shim/Promise';
@@ -19,11 +19,14 @@ import icache from '../../../../src/core/middleware/icache';
 const resolvers = createResolvers();
 
 describe('Resources Middleware', () => {
+	const now = Date.now;
+
 	beforeEach(() => {
 		resolvers.stub();
 	});
 	afterEach(() => {
 		resolvers.restore();
+		Date.now = now;
 	});
 
 	it('getOrRead with options', () => {
@@ -329,6 +332,112 @@ describe('Resources Middleware', () => {
 		await promise;
 		resolvers.resolveRAF();
 		assert.strictEqual(root.innerHTML, `<div>${JSON.stringify([[{ hello: 'world' }]])}</div>`);
+	});
+
+	it('supports cache control max-age', () => {
+		const factory = create({ invalidator, resource: createResourceMiddleware<{ hello: string }>() });
+
+		let counter = 0;
+		const template = createResourceTemplate<{ hello: string }>({
+			cacheControl: { directive: 'max-age', seconds: 3 },
+			read: (options, { put }) => {
+				put({ data: [{ hello: `${counter}` }], total: 1 }, options);
+				counter++;
+			},
+			find: defaultFind
+		});
+
+		let invalidate: undefined | Function;
+		let results;
+
+		const Widget = factory(({ id, properties, middleware: { resource, invalidator } }) => {
+			invalidate = invalidator;
+			const { getOrRead, createOptions } = resource;
+			const {
+				resource: { template, options = createOptions(id) }
+			} = properties();
+			[[results]] = getOrRead(template, options({ size: 1, page: 1 }));
+			return null;
+		});
+
+		const App = create({ resource: createResourceMiddleware() })(({ middleware: { resource } }) => {
+			return <Widget resource={resource({ template })} />;
+		});
+
+		const r = renderer(() => <App />);
+		const root = document.createElement('div');
+		r.mount({ domNode: root });
+		assert.deepEqual(results, { hello: '0' });
+
+		invalidate!();
+		resolvers.resolveRAF();
+		assert.deepEqual(results, { hello: '0' });
+
+		const now = Date.now();
+		Date.now = () => now + 2000;
+		invalidate!();
+		resolvers.resolveRAF();
+		assert.deepEqual(results, { hello: '0' });
+
+		Date.now = () => now + 3001;
+		invalidate!();
+		resolvers.resolveRAF();
+		assert.deepEqual(results, { hello: '1' });
+
+		invalidate!();
+		resolvers.resolveRAF();
+		assert.deepEqual(results, { hello: '1' });
+
+		Date.now = () => now + 6002;
+		invalidate!();
+		resolvers.resolveRAF();
+		assert.deepEqual(results, { hello: '2' });
+	});
+
+	it('supports cache control immutable', () => {
+		const factory = create({ invalidator, resource: createResourceMiddleware<{ hello: string }>() });
+
+		let counter = 0;
+		const template = createResourceTemplate<{ hello: string }>({
+			cacheControl: { directive: 'immutable' },
+			read: (options, { put }) => {
+				put({ data: [{ hello: `${counter}` }], total: 1 }, options);
+				counter++;
+			},
+			find: defaultFind
+		});
+
+		let invalidate: undefined | Function;
+		let results;
+
+		const Widget = factory(({ id, properties, middleware: { resource, invalidator } }) => {
+			invalidate = invalidator;
+			const { getOrRead, createOptions } = resource;
+			const {
+				resource: { template, options = createOptions(id) }
+			} = properties();
+			[[results]] = getOrRead(template, options({ size: 1, page: 1 }));
+			return null;
+		});
+
+		const App = create({ resource: createResourceMiddleware() })(({ middleware: { resource } }) => {
+			return <Widget resource={resource({ template })} />;
+		});
+
+		const r = renderer(() => <App />);
+		const root = document.createElement('div');
+		r.mount({ domNode: root });
+		assert.deepEqual(results, { hello: '0' });
+
+		invalidate!();
+		resolvers.resolveRAF();
+		assert.deepEqual(results, { hello: '0' });
+
+		const now = Date.now();
+		Date.now = () => now + 2000;
+		invalidate!();
+		resolvers.resolveRAF();
+		assert.deepEqual(results, { hello: '0' });
 	});
 
 	it('returns failed status of resource', async () => {
