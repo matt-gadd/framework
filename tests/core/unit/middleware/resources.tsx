@@ -348,50 +348,75 @@ describe('Resources Middleware', () => {
 		});
 
 		let invalidate: undefined | Function;
-		let results;
+		let fooResults;
+		let barResults;
 
-		const Widget = factory(({ id, properties, middleware: { resource, invalidator } }) => {
+		const Foo = factory(({ id, properties, middleware: { resource, invalidator } }) => {
 			invalidate = invalidator;
 			const { getOrRead, createOptions } = resource;
 			const {
 				resource: { template, options = createOptions(id) }
 			} = properties();
-			[[results]] = getOrRead(template, options({ size: 1, page: 1 }));
+			[[fooResults]] = getOrRead(template, options({ size: 1, page: 1 }));
+			return null;
+		});
+
+		const Bar = factory(({ id, properties, middleware: { resource, invalidator } }) => {
+			const { getOrRead, createOptions } = resource;
+			const {
+				resource: { template, options = createOptions(id) }
+			} = properties();
+			[[barResults]] = getOrRead(template, options({ size: 1, page: 1 }));
 			return null;
 		});
 
 		const App = create({ resource: createResourceMiddleware() })(({ middleware: { resource } }) => {
-			return <Widget resource={resource({ template })} />;
+			return (
+				<div>
+					<Foo resource={resource({ template })} />
+					<Bar resource={resource({ template })} />
+				</div>
+			);
 		});
 
 		const r = renderer(() => <App />);
 		const root = document.createElement('div');
 		r.mount({ domNode: root });
-		assert.deepEqual(results, { hello: '0' });
+		assert.deepEqual(fooResults, { hello: '0' });
+		assert.deepEqual(barResults, { hello: '0' });
 
 		invalidate!();
 		resolvers.resolveRAF();
-		assert.deepEqual(results, { hello: '0' });
+		assert.deepEqual(fooResults, { hello: '0' });
+		assert.deepEqual(barResults, { hello: '0' });
 
 		const now = Date.now();
 		Date.now = () => now + 2000;
 		invalidate!();
 		resolvers.resolveRAF();
-		assert.deepEqual(results, { hello: '0' });
+		assert.deepEqual(fooResults, { hello: '0' });
+		assert.deepEqual(barResults, { hello: '0' });
 
 		Date.now = () => now + 3001;
 		invalidate!();
 		resolvers.resolveRAF();
-		assert.deepEqual(results, { hello: '1' });
+		assert.deepEqual(fooResults, { hello: '1' });
+		// foo widget by side effect will trigger invalidation for bar
+		resolvers.resolveRAF();
+		assert.deepEqual(barResults, { hello: '1' });
 
 		invalidate!();
 		resolvers.resolveRAF();
-		assert.deepEqual(results, { hello: '1' });
+		assert.deepEqual(fooResults, { hello: '1' });
+		assert.deepEqual(barResults, { hello: '1' });
 
 		Date.now = () => now + 6002;
 		invalidate!();
 		resolvers.resolveRAF();
-		assert.deepEqual(results, { hello: '2' });
+		assert.deepEqual(fooResults, { hello: '2' });
+		// foo widget by side effect will trigger invalidation for bar
+		resolvers.resolveRAF();
+		assert.deepEqual(barResults, { hello: '2' });
 	});
 
 	it('supports cache control immutable', () => {
@@ -408,36 +433,54 @@ describe('Resources Middleware', () => {
 		});
 
 		let invalidate: undefined | Function;
-		let results;
+		let fooResults;
+		let barResults;
 
-		const Widget = factory(({ id, properties, middleware: { resource, invalidator } }) => {
+		const Foo = factory(({ id, properties, middleware: { resource, invalidator } }) => {
 			invalidate = invalidator;
 			const { getOrRead, createOptions } = resource;
 			const {
 				resource: { template, options = createOptions(id) }
 			} = properties();
-			[[results]] = getOrRead(template, options({ size: 1, page: 1 }));
+			[[fooResults]] = getOrRead(template, options({ size: 1, page: 1 }));
+			return null;
+		});
+
+		const Bar = factory(({ id, properties, middleware: { resource, invalidator } }) => {
+			const { getOrRead, createOptions } = resource;
+			const {
+				resource: { template, options = createOptions(id) }
+			} = properties();
+			[[barResults]] = getOrRead(template, options({ size: 1, page: 1 }));
 			return null;
 		});
 
 		const App = create({ resource: createResourceMiddleware() })(({ middleware: { resource } }) => {
-			return <Widget resource={resource({ template })} />;
+			return (
+				<div>
+					<Foo resource={resource({ template })} />
+					<Bar resource={resource({ template })} />
+				</div>
+			);
 		});
 
 		const r = renderer(() => <App />);
 		const root = document.createElement('div');
 		r.mount({ domNode: root });
-		assert.deepEqual(results, { hello: '0' });
+		assert.deepEqual(fooResults, { hello: '0' });
+		assert.deepEqual(barResults, { hello: '0' });
 
 		invalidate!();
 		resolvers.resolveRAF();
-		assert.deepEqual(results, { hello: '0' });
+		assert.deepEqual(fooResults, { hello: '0' });
+		assert.deepEqual(barResults, { hello: '0' });
 
 		const now = Date.now();
 		Date.now = () => now + 2000;
 		invalidate!();
 		resolvers.resolveRAF();
-		assert.deepEqual(results, { hello: '0' });
+		assert.deepEqual(fooResults, { hello: '0' });
+		assert.deepEqual(barResults, { hello: '0' });
 	});
 
 	it('returns failed status of resource', async () => {
