@@ -166,7 +166,7 @@ export interface WNodeWrapper extends BaseNodeWrapper {
 
 export interface WidgetMeta {
 	widgetName: string;
-	mountNode: HTMLElement;
+	mountNode: DomApi;
 	dirty: boolean;
 	invalidator: () => void;
 	middleware?: any;
@@ -177,7 +177,7 @@ export interface WidgetMeta {
 	originalProperties: any;
 	children?: DNode[];
 	rendering: boolean;
-	nodeMap?: Map<string | number, HTMLElement>;
+	nodeMap?: Map<string | number, DomApi>;
 	destroyMap?: Map<string, () => void>;
 	deferRefs: number;
 	customDiffProperties?: Set<string>;
@@ -209,9 +209,150 @@ export interface MountOptions {
 	sync: boolean;
 	merge: boolean;
 	transition?: TransitionStrategy;
-	domNode: HTMLElement | null;
+	domNode: DomApi | null;
 	registry: Registry;
 }
+
+export interface DomApi<RawNode = any> {
+	getRaw(): RawNode;
+	getTag(): string;
+	getParent(): DomApi | undefined;
+	setParent(node: DomApi | undefined): void;
+	getChildren(): DomApi[];
+	setProperty(key: string, value: any): void;
+	getProperty(key: string): any;
+	addEvent(name: string, callback: () => void): void;
+	removeEvent(name: string, callback: () => void): void;
+	setAttribute(key: string, value: string): void;
+	getAttribute(key: string): null | string;
+	removeAttribute(key: string): void;
+	appendChild(node: DomApi): void;
+	removeChild(node: DomApi): void;
+	insertBefore(newNode: DomApi, referenceNode: DomApi): void;
+}
+
+export interface DocumentApi {
+	getBody(): DomApi;
+	getHead(): DomApi;
+	createElement(tag: string): DomApi;
+	createText(text: string): TextApi;
+}
+
+export interface TextApi<RawNode = any> {
+	getRaw(): RawNode;
+	setText(text: string): void;
+	getText(): string;
+}
+
+class DomNode implements DomApi<HTMLElement> {
+	private _element: HTMLElement;
+	private _children: DomApi<HTMLElement>[] = [];
+	private _parent: DomApi<HTMLElement> | undefined;
+	constructor(tag: string, options: any = {}) {
+		if (options.existing) {
+			this._element = options.existing;
+			for (let i = 0; this._element.children; i++) {
+				this._children.push(new DomNode('', { existing: this._element.children[i] }));
+			}
+		} else {
+			this._element = global.document.createElement(tag);
+		}
+	}
+	getTag() {
+		return this._element.tagName;
+	}
+	getRaw() {
+		return this._element;
+	}
+	getChildren() {
+		return this._children;
+	}
+	getParent() {
+		return this._parent;
+	}
+	setParent(node: DomApi) {
+		this._parent = node;
+	}
+	setAttribute(key: string, value: string) {
+		this._element.setAttribute(key, value);
+	}
+	removeAttribute(key: string) {
+		this._element.removeAttribute(key);
+	}
+	getAttribute(key: string) {
+		return this._element.getAttribute(key);
+	}
+	setProperty(key: string, value: any) {
+		(this._element as any)[key] = value;
+	}
+	getProperty(key: string) {
+		return (this._element as any)[key];
+	}
+	addEvent(name: string, callback: () => void) {
+		this._element.addEventListener(name, callback);
+	}
+	removeEvent(name: string, callback: () => void) {
+		this._element.removeEventListener(name, callback);
+	}
+	appendChild(node: DomApi) {
+		this._children.push(node);
+		node.setParent(this);
+		return this._element.appendChild(node.getRaw());
+	}
+	removeChild(node: DomApi) {
+		const index = this._children.indexOf(node);
+		this._children.splice(index, 1);
+		node.setParent(undefined);
+	}
+	replaceChild(newChild: DomApi, oldChild: DomApi) {
+		const index = this._children.indexOf(oldChild);
+		oldChild.setParent(undefined);
+		this._children.splice(index, 1, newChild);
+	}
+	insertBefore(newNode: DomApi, referenceNode: DomApi) {
+		if (referenceNode) {
+			const index = this._children.indexOf(referenceNode);
+			this._children.splice(index, 0, newNode);
+			newNode.setParent(this);
+			return this._element.insertBefore(newNode.getRaw(), referenceNode.getRaw());
+		} else {
+			this.appendChild(newNode);
+		}
+	}
+}
+
+class TextNode implements TextApi {
+	_textElement: Text;
+	constructor(text: string) {
+		this._textElement = global.document.createTextNode(text);
+	}
+	getRaw() {
+		return this._textElement;
+	}
+	setText(text: string) {
+		this._textElement.textContent = text;
+	}
+	getText() {
+		return this._textElement.textContent || '';
+	}
+}
+
+class Document implements DocumentApi {
+	getBody() {
+		return new DomNode(global.document.body);
+	}
+	getHead() {
+		return new DomNode(global.document.head);
+	}
+	createElement(tag: string) {
+		return new DomNode(tag);
+	}
+	createText(text: string) {
+		return new TextNode(text);
+	}
+}
+
+const defaultDocument = new Document();
 
 export interface Renderer {
 	invalidate(): void;
@@ -420,7 +561,7 @@ function toTextVNode(data: any): VNode {
 }
 
 function updateAttributes(
-	domNode: Element,
+	domNode: DomApi,
 	previousAttributes: { [index: string]: string | undefined },
 	attributes: { [index: string]: string | undefined },
 	namespace?: string
@@ -504,9 +645,9 @@ export function w<W extends WidgetBaseTypes>(
 export function v(node: VNode, properties: VNodeProperties, children: undefined | DNode[]): VNode;
 export function v(node: VNode, properties: VNodeProperties): VNode;
 export function v(tag: string, children: undefined | DNode[]): VNode;
-export function v<K extends keyof HTMLElementTagNameMap>(
+export function v<K extends keyof DomApiTagNameMap>(
 	tag: K,
-	properties: DeferredVirtualProperties | VNodeProperties<HTMLElementTagNameMap[K]>,
+	properties: DeferredVirtualProperties | VNodeProperties<DomApiTagNameMap[K]>,
 	children?: DNode[]
 ): VNode;
 export function v(tag: string, properties: DeferredVirtualProperties | VNodeProperties, children?: DNode[]): VNode;
@@ -651,7 +792,7 @@ function buildPreviousProperties(domNode: any, current: VNodeWrapper) {
 		newProperties.attributes = {};
 		newProperties.events = current.node.events;
 		Object.keys(properties).forEach((propName) => {
-			newProperties.properties[propName] = domNode[propName];
+			newProperties.properties[propName] = domNode.getProperty(propName);
 		});
 		Object.keys(attributes).forEach((attrName) => {
 			newProperties.attributes[attrName] = domNode.getAttribute(attrName);
@@ -660,7 +801,7 @@ function buildPreviousProperties(domNode: any, current: VNodeWrapper) {
 	}
 	newProperties.properties = Object.keys(properties).reduce(
 		(props, property) => {
-			props[property] = domNode.getAttribute(property) || domNode[property];
+			props[property] = domNode.getAttribute(property) || domNode.getProperty(property);
 			return props;
 		},
 		{} as any
@@ -770,7 +911,7 @@ function createClassPropValue(classes: SupportedClassName | SupportedClassName[]
 	return classNames;
 }
 
-function updateAttribute(domNode: Element, attrName: string, attrValue: string | undefined, namespace?: string) {
+function updateAttribute(domNode: DomApi, attrName: string, attrValue: string | undefined, namespace?: string) {
 	if (namespace === NAMESPACE_SVG && attrName === 'href' && attrValue) {
 		domNode.setAttributeNS(NAMESPACE_XLINK, attrName, attrValue);
 	} else if ((attrName === 'role' && attrValue === '') || attrValue === undefined) {
@@ -1039,7 +1180,7 @@ const requestedDomNodes = new Set();
 let wrapperId = 0;
 let metaId = 0;
 
-function addNodeToMap(id: string, key: string | number, node: HTMLElement) {
+function addNodeToMap(id: string, key: string | number, node: DomApi) {
 	const widgetMeta = widgetMetaMap.get(id);
 	if (widgetMeta) {
 		widgetMeta.nodeMap = widgetMeta.nodeMap || new Map();
@@ -1096,7 +1237,7 @@ export const invalidator = factory(({ id }) => {
 
 export const node = factory(({ id }) => {
 	return {
-		get(key: string | number): HTMLElement | null {
+		get(key: string | number): DomApi | null {
 			const [widgetId] = id.split('-');
 			const widgetMeta = widgetMetaMap.get(widgetId);
 			if (widgetMeta) {
@@ -1239,22 +1380,22 @@ function wrapFunctionProperties(id: string, properties: any) {
 type EventMapValue = { proxy: EventListener; callback: Function; options: { passive: boolean } } | undefined;
 
 export function renderer(renderer: () => RenderResult): Renderer {
-	let _mountOptions: MountOptions & { domNode: HTMLElement } = {
+	let _mountOptions: MountOptions = {
 		sync: false,
 		merge: true,
 		transition: undefined,
-		domNode: global.document.body,
+		domNode: null,
 		registry: new Registry()
 	};
 	let _invalidationQueue: InvalidationQueueItem[] = [];
 	let _processQueue: (ProcessItem | DetachApplication | AttachApplication)[] = [];
 	let _deferredProcessQueue: (ProcessItem | DetachApplication | AttachApplication)[] = [];
 	let _applicationQueue: ApplicationInstruction[] = [];
-	let _eventMap = new WeakMap<Node, { [index: string]: EventMapValue }>();
+	let _eventMap = new WeakMap<DomApi, { [index: string]: EventMapValue }>();
 	let _idToWrapperMap = new Map<string, DNodeWrapper>();
 	let _wrapperSiblingMap = new WeakMap<DNodeWrapper, DNodeWrapper>();
 	let _idToChildrenWrappers = new Map<string, DNodeWrapper[]>();
-	let _insertBeforeMap: undefined | WeakMap<DNodeWrapper, Node> = new WeakMap<DNodeWrapper, Node>();
+	let _insertBeforeMap: undefined | WeakMap<DNodeWrapper, DomApi> = new WeakMap<DNodeWrapper, DomApi>();
 	let _nodeToWrapperMap = new WeakMap<VNode | WNode<any>, WNodeWrapper>();
 	let _renderScheduled: number | undefined;
 	let _deferredRenderCallbacks: Function[] = [];
@@ -1267,7 +1408,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 		propName: string,
 		propValue: (() => boolean) | boolean,
 		previousValue: boolean,
-		domNode: HTMLElement & { [index: string]: any }
+		domNode: DomApi & { [index: string]: any }
 	): void {
 		let result = propValue && !previousValue;
 		if (typeof propValue === 'function') {
@@ -1281,7 +1422,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 	}
 
 	function updateEvent(
-		domNode: Node,
+		domNode: DomApi,
 		eventName: string,
 		currentValue: (event: Event) => void,
 		eventOptions?: { passive: string[] }
@@ -1305,7 +1446,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 		const options = { passive: isPassive };
 
 		if (proxyEvent && proxyEvent.options.passive !== isPassive) {
-			domNode.removeEventListener(eventName, proxyEvent.proxy);
+			domNode.removeEvent(eventName, proxyEvent.proxy);
 			proxyEvent = undefined;
 		}
 
@@ -1319,16 +1460,14 @@ export function renderer(renderer: () => RenderResult): Renderer {
 				proxyEvent && proxyEvent.callback(...args);
 			};
 			proxyEvents[eventName] = { callback, proxy, options };
-			has('dom-passive-event')
-				? domNode.addEventListener(eventName, proxy, options)
-				: domNode.addEventListener(eventName, proxy);
+			has('dom-passive-event') ? domNode.addEvent(eventName, proxy, options) : domNode.addEvent(eventName, proxy);
 
 			_eventMap.set(domNode, proxyEvents);
 		}
 	}
 
 	function removeOrphanedEvents(
-		domNode: Element,
+		domNode: DomApi,
 		previousProperties: VNodeProperties,
 		properties: VNodeProperties,
 		onlyEvents: boolean = false
@@ -1340,7 +1479,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 				const proxyEvents = _eventMap.get(domNode) || {};
 				let proxyEvent = proxyEvents[eventName];
 				if (proxyEvent) {
-					domNode.removeEventListener(eventName, proxyEvent.proxy);
+					domNode.removeEvent(eventName, proxyEvent.proxy as any);
 					delete proxyEvents[eventName];
 					_eventMap.set(domNode, proxyEvents);
 				}
@@ -1518,7 +1657,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 	}
 
 	function findInsertBefore(next: DNodeWrapper) {
-		let insertBefore: Node | null = null;
+		let insertBefore: DomApi | null = null;
 		let searchNode: DNodeWrapper | undefined = next;
 		while (!insertBefore) {
 			const nextSibling = _wrapperSiblingMap.get(searchNode);
@@ -1544,7 +1683,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 						}
 					}
 				}
-				if (!nextSibling.reparent && domNode && domNode.parentNode) {
+				if (!nextSibling.reparent && domNode && domNode.getParent()) {
 					insertBefore = domNode;
 					break;
 				}
@@ -1560,23 +1699,23 @@ export function renderer(renderer: () => RenderResult): Renderer {
 	}
 
 	function setValue(domNode: any, propValue?: any, previousValue?: any) {
-		const domValue = domNode.value;
-		const onInputValue = domNode['oninput-value'];
-		const onSelectValue = domNode['select-value'];
+		const domValue = domNode.getProperty('value');
+		const onInputValue = domNode.getProperty('oninput-value');
+		const onSelectValue = domNode.getProperty('select-value');
 
 		if (onSelectValue && domValue !== onSelectValue) {
 			domNode.value = onSelectValue;
 			if (domNode.value === onSelectValue) {
-				domNode['select-value'] = undefined;
+				domNode.setProperty('select-value', undefined);
 			}
 		} else if ((onInputValue && domValue === onInputValue) || propValue !== previousValue) {
 			domNode.value = propValue;
-			domNode['oninput-value'] = undefined;
+			domNode.setProperty('oninput-value', undefined);
 		}
 	}
 
 	function setProperties(
-		domNode: HTMLElement,
+		domNode: DomApi,
 		currentProperties: VNodeProperties = {},
 		nextWrapper: VNodeWrapper,
 		includesEventsAndAttributes = true
@@ -1626,15 +1765,15 @@ export function renderer(renderer: () => RenderResult): Renderer {
 					if (newStyleValue === oldStyleValue) {
 						continue;
 					}
-					(domNode.style as any)[styleName] = newStyleValue || '';
+					(domNode.getProperty('style') as any)[styleName] = newStyleValue || '';
 				}
 			} else {
 				if (!propValue && typeof previousValue === 'string') {
 					propValue = '';
 				}
 				if (propName === 'value') {
-					if ((domNode as HTMLElement).tagName === 'SELECT') {
-						(domNode as any)['select-value'] = propValue;
+					if (domNode.getTag() === 'SELECT') {
+						domNode.setProperty('select-value', propValue);
 					}
 					setValue(domNode, propValue, previousValue);
 				} else if (propName !== 'key') {
@@ -1651,11 +1790,11 @@ export function renderer(renderer: () => RenderResult): Renderer {
 						if (type === 'string' && propName !== 'innerHTML' && includesEventsAndAttributes) {
 							updateAttribute(domNode, propName, propValue, nextWrapper.namespace);
 						} else if (propName === 'scrollLeft' || propName === 'scrollTop') {
-							if ((domNode as any)[propName] !== propValue) {
-								(domNode as any)[propName] = propValue;
+							if ((domNode as any).getProperty(propName) !== propValue) {
+								(domNode as any).setProperty(propName, propValue);
 							}
 						} else {
-							(domNode as any)[propName] = propValue;
+							domNode.setProperty(propName, propValue);
 						}
 					}
 				}
@@ -1695,28 +1834,18 @@ export function renderer(renderer: () => RenderResult): Renderer {
 
 	function processProperties(next: VNodeWrapper, previousProperties: PreviousProperties) {
 		if (next.node.attributes && next.node.events) {
-			updateAttributes(
-				next.domNode as HTMLElement,
-				previousProperties.attributes || {},
-				next.node.attributes,
-				next.namespace
-			);
-			setProperties(next.domNode as HTMLElement, previousProperties.properties, next, false);
+			updateAttributes(next.domNode, previousProperties.attributes || {}, next.node.attributes, next.namespace);
+			setProperties(next.domNode, previousProperties.properties, next, false);
 			const events = next.node.events || {};
 			if (previousProperties.events) {
-				removeOrphanedEvents(
-					next.domNode as HTMLElement,
-					previousProperties.events || {},
-					next.node.events,
-					true
-				);
+				removeOrphanedEvents(next.domNodei, previousProperties.events || {}, next.node.events, true);
 			}
 			previousProperties.events = previousProperties.events || {};
 			Object.keys(events).forEach((event) => {
-				updateEvent(next.domNode as HTMLElement, event, events[event]);
+				updateEvent(next.domNode, event, events[event]);
 			});
 		} else {
-			setProperties(next.domNode as HTMLElement, previousProperties.properties, next);
+			setProperties(next.domNode, previousProperties.properties, next);
 		}
 	}
 
@@ -1757,8 +1886,9 @@ export function renderer(renderer: () => RenderResult): Renderer {
 			if (has('dojo-debug') && domNode === null) {
 				console.warn('Unable to find node to mount the application, defaulting to the document body.');
 			}
-			domNode = global.document.body as HTMLElement;
+			domNode = global.document.body as DomApi;
 		}
+		domNode = new DomNode('', { existing: domNode });
 		_mountOptions = { ..._mountOptions, ...mountOptions, domNode };
 		const renderResult = wrapNodes(renderer)({}, []);
 		_appWrapperId = `${wrapperId++}`;
@@ -1784,7 +1914,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 		_processQueue.push({
 			current: [],
 			next: [nextWrapper],
-			meta: { mergeNodes: arrayFrom(domNode.childNodes) }
+			meta: { mergeNodes: arrayFrom(domNode.getChildren()) }
 		});
 		_runProcessQueue();
 		_runDomInstructionQueue();
@@ -1929,20 +2059,20 @@ export function renderer(renderer: () => RenderResult): Renderer {
 						next.node.onAttach();
 					}
 				}
-				if ((domNode as HTMLElement).tagName === 'OPTION' && domNode!.parentElement) {
+				if (domNode.getTag() === 'OPTION' && domNode!.parentElement) {
 					setValue(domNode!.parentElement);
 				}
 				const { enterAnimation, enterAnimationActive } = node.properties;
 				if (_mountOptions.transition && enterAnimation && enterAnimation !== true) {
-					_mountOptions.transition.enter(domNode as HTMLElement, enterAnimation, enterAnimationActive);
+					_mountOptions.transition.enter(domNode, enterAnimation, enterAnimationActive);
 				}
 				const owningWrapper = _nodeToWrapperMap.get(next.node);
 				if (owningWrapper && node.properties.key != null) {
 					if (owningWrapper.instance) {
 						const instanceData = widgetInstanceMap.get(owningWrapper.instance);
-						instanceData && instanceData.nodeHandler.add(domNode as HTMLElement, `${node.properties.key}`);
+						instanceData && instanceData.nodeHandler.add(domNode, `${node.properties.key}`);
 					} else {
-						addNodeToMap(owningWrapper.id, node.properties.key, domNode as HTMLElement);
+						addNodeToMap(owningWrapper.id, node.properties.key, domNode);
 					}
 				}
 				item.next.inserted = true;
@@ -1968,7 +2098,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 				const { current } = item;
 				const { exitAnimation, exitAnimationActive } = current.node.properties;
 				if (_mountOptions.transition && exitAnimation && exitAnimation !== true) {
-					_mountOptions.transition.exit(current.domNode as HTMLElement, exitAnimation, exitAnimationActive);
+					_mountOptions.transition.exit(current.domNode, exitAnimation, exitAnimationActive);
 				} else {
 					current.domNode!.parentNode!.removeChild(current.domNode!);
 				}
@@ -2497,17 +2627,17 @@ export function renderer(renderer: () => RenderResult): Renderer {
 					next.namespace = NAMESPACE_SVG;
 				}
 				if (isBody) {
-					next.domNode = global.document.body;
+					next.domNode = defaultDocument.getBody();
 				} else if (isHead) {
-					next.domNode = global.document.head;
+					next.domNode = defaultDocument.getHead();
 				} else if (next.node.tag && !isVirtual) {
 					if (next.namespace) {
 						next.domNode = global.document.createElementNS(next.namespace, next.node.tag);
 					} else {
-						next.domNode = global.document.createElement(next.node.tag);
+						next.domNode = defaultDocument.createElement(next.node.tag);
 					}
 				} else if (next.node.text != null) {
-					next.domNode = global.document.createTextNode(next.node.text);
+					next.domNode = defaultDocument.createText(next.node.text);
 				}
 			}
 			if (_insertBeforeMap && _allMergedNodes.length) {
@@ -2520,7 +2650,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 			if (isTextNode(next.domNode)) {
 				if (next.domNode.data !== next.node.text) {
 					_allMergedNodes = [next.domNode, ..._allMergedNodes];
-					next.domNode = global.document.createTextNode(next.node.text);
+					next.domNode = defaultDocument.createText(next.node.text || '');
 					next.merged = false;
 				}
 			} else {
@@ -2644,8 +2774,8 @@ export function renderer(renderer: () => RenderResult): Renderer {
 					} else if (specialIds.indexOf(wrapper.parentId) !== -1) {
 						if (isWNodeWrapper(wrapper) || isVirtualWrapper(wrapper)) {
 							specialIds.push(wrapper.id);
-						} else if (wrapper.domNode && wrapper.domNode.parentNode) {
-							wrapper.domNode.parentNode.removeChild(wrapper.domNode);
+						} else if (wrapper.domNode && wrapper.domNode.getParent()) {
+							wrapper.domNode.getParent().removeChild(wrapper.domNode);
 						}
 					} else if (isDomVNode(wrapper.node) && wrapper.node.onDetach) {
 						wrapper.node.onDetach();

@@ -1222,8 +1222,32 @@ export interface VNode {
 	diffType?: DiffType;
 }
 
+export interface DomApi<RawNode = any> {
+	getRaw(): RawNode;
+	getTag(): string;
+	getParent(): DomApi | undefined;
+	setParent(node: DomApi | undefined): void;
+	getChildren(): DomApi[];
+	setProperty(key: string, value: any): void;
+	getProperty(key: string): any;
+	addEvent(name: string, callback: () => void): void;
+	removeEvent(name: string, callback: () => void): void;
+	setAttribute(key: string, value: string): void;
+	getAttribute(key: string): null | string;
+	removeAttribute(key: string): void;
+	appendChild(node: DomApi): void;
+	removeChild(node: DomApi): void;
+	insertBefore(newNode: DomApi, referenceNode: DomApi): void;
+}
+
+export interface TextApi<RawNode = any> {
+	getRaw(): RawNode;
+	setText(text: string): void;
+	getText(): string;
+}
+
 export interface DomVNode extends VNode {
-	domNode: Text | Element;
+	domNode: TextApi | DomApi;
 	onAttach?: () => void;
 	onUpdate?: () => void;
 	onDetach?: () => void;
