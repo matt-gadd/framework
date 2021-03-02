@@ -218,35 +218,33 @@ export interface MountOptions {
 	registry: Registry;
 	ownerDocument?: Document;
 	nodeApi?: {
-		create(tag: string, options: NodeApiOptions): HTMLElement;
-		getProperty(domNode: HTMLElement, key: string, options: NodeApiOptions): any;
-		setProperty(domNode: HTMLElement, key: string, value: any, options: NodeApiOptions): void;
+		create(tag: string, options: NodeApiOptions): Node;
+		getProperty(domNode: Node, key: string, options: NodeApiOptions): any;
+		setProperty(domNode: Node, key: string, value: any, options: NodeApiOptions): void;
 		getAttribute(domNode: HTMLElement, key: string): string | null;
 		setAttribute(domNode: HTMLElement, key: string, value: string, options: NodeApiOptions): void;
 		removeAttribute(domNode: HTMLElement, key: string, options: NodeApiOptions): void;
-		insertBefore(
-			domNode: HTMLElement,
-			newNode: HTMLElement,
-			referenceNode: HTMLElement,
-			options: NodeApiOptions
-		): void;
-		removeChild(domNode: HTMLElement, childNode: HTMLElement, options: NodeApiOptions): void;
+		insertBefore(domNode: Node, newNode: Node, referenceNode: Node, options: NodeApiOptions): void;
+		removeChild(domNode: Node, childNode: Node, options: NodeApiOptions): void;
 		addEvent(
-			domNode: HTMLElement,
+			domNode: Node,
 			name: string,
 			callback: EventListener,
 			eventOptions: any,
 			options: NodeApiOptions
 		): void;
 		removeEvent(
-			domNode: HTMLElement,
+			domNode: Node,
 			name: string,
 			callback: EventListener,
 			eventOptions: any,
 			options: NodeApiOptions
 		): void;
-		getParent(domNode: HTMLElement, options: NodeApiOptions): HTMLElement | null;
-		replaceChild(domNode: HTMLElement, newChild: HTMLElement, oldChild: HTMLElement, options: NodeApiOptions): void;
+		getParent(domNode: Node, options: NodeApiOptions): Node | null;
+		replaceChild(domNode: Node, newChild: Node, oldChild: Node, options: NodeApiOptions): void;
+		contains(domNode: Node, child: Node): boolean;
+		requestAnimationFrame(callback: () => void): number;
+		cancelAnimationFrame(id: number): void;
 	};
 }
 
@@ -288,6 +286,15 @@ const defaultNodeApi: MountOptions['nodeApi'] = {
 	},
 	replaceChild(domNode, newChild, oldChild) {
 		domNode.replaceChild(newChild, oldChild);
+	},
+	contains(domNode, child) {
+		return domNode.contains(child);
+	},
+	requestAnimationFrame(callback) {
+		return global.requestAnimationFrame(callback);
+	},
+	cancelAnimationFrame(number) {
+		return global.cancelAnimationFrame(number);
 	}
 };
 
@@ -497,24 +504,6 @@ function toTextVNode(data: any): VNode {
 	};
 }
 
-function updateAttributes(
-	domNode: Element,
-	previousAttributes: { [index: string]: string | undefined },
-	attributes: { [index: string]: string | undefined },
-	namespace?: string
-) {
-	const attrNames = Object.keys(attributes);
-	const attrCount = attrNames.length;
-	for (let i = 0; i < attrCount; i++) {
-		const attrName = attrNames[i];
-		const attrValue = attributes[attrName];
-		const previousAttrValue = previousAttributes[attrName];
-		if (attrValue !== previousAttrValue) {
-			updateAttribute(domNode, attrName, attrValue, namespace);
-		}
-	}
-}
-
 /**
  * Wrapper function for calls to create a widget.
  */
@@ -703,49 +692,6 @@ export function propertiesDiff(current: any, next: any, invalidator: () => void,
 	}
 }
 
-function buildPreviousProperties(domNode: any, current: VNodeWrapper) {
-	const {
-		node: { diffType, properties, attributes }
-	} = current;
-	if (!diffType || diffType === 'vdom') {
-		return {
-			properties: current.deferredProperties
-				? { ...current.deferredProperties, ...current.node.properties }
-				: current.node.properties,
-			attributes: current.node.attributes,
-			events: current.node.events
-		};
-	} else if (diffType === 'none') {
-		return {
-			properties: {},
-			attributes: current.node.attributes ? {} : undefined,
-			events: current.node.events
-		};
-	}
-	let newProperties: any = {
-		properties: {}
-	};
-	if (attributes) {
-		newProperties.attributes = {};
-		newProperties.events = current.node.events;
-		Object.keys(properties).forEach((propName) => {
-			newProperties.properties[propName] = domNode[propName];
-		});
-		Object.keys(attributes).forEach((attrName) => {
-			newProperties.attributes[attrName] = domNode.getAttribute(attrName);
-		});
-		return newProperties;
-	}
-	newProperties.properties = Object.keys(properties).reduce(
-		(props, property) => {
-			props[property] = domNode.getAttribute(property) || domNode[property];
-			return props;
-		},
-		{} as any
-	);
-	return newProperties;
-}
-
 function checkDistinguishable(wrappers: DNodeWrapper[], index: number, parentWNodeWrapper?: WNodeWrapper) {
 	const wrapperToCheck = wrappers[index];
 	if (isVNodeWrapper(wrapperToCheck) && !wrapperToCheck.node.tag) {
@@ -846,16 +792,6 @@ function createClassPropValue(classes: SupportedClassName | SupportedClassName[]
 		classNames = classes;
 	}
 	return classNames;
-}
-
-function updateAttribute(domNode: Element, attrName: string, attrValue: string | undefined, namespace?: string) {
-	if (namespace === NAMESPACE_SVG && attrName === 'href' && attrValue) {
-		domNode.setAttributeNS(NAMESPACE_XLINK, attrName, attrValue);
-	} else if ((attrName === 'role' && attrValue === '') || attrValue === undefined) {
-		domNode.removeAttribute(attrName);
-	} else {
-		domNode.setAttribute(attrName, attrValue);
-	}
 }
 
 function arrayFrom(arr: any) {
@@ -1357,6 +1293,77 @@ export function renderer(renderer: () => RenderResult): Renderer {
 		}
 	}
 
+	function updateAttribute(domNode: Element, attrName: string, attrValue: string | undefined, namespace?: string) {
+		if (namespace === NAMESPACE_SVG && attrName === 'href' && attrValue) {
+			domNode.setAttributeNS(NAMESPACE_XLINK, attrName, attrValue);
+		} else if ((attrName === 'role' && attrValue === '') || attrValue === undefined) {
+			domNode.removeAttribute(attrName);
+		} else {
+			domNode.setAttribute(attrName, attrValue);
+		}
+	}
+
+	function updateAttributes(
+		domNode: Element,
+		previousAttributes: { [index: string]: string | undefined },
+		attributes: { [index: string]: string | undefined },
+		namespace?: string
+	) {
+		const attrNames = Object.keys(attributes);
+		const attrCount = attrNames.length;
+		for (let i = 0; i < attrCount; i++) {
+			const attrName = attrNames[i];
+			const attrValue = attributes[attrName];
+			const previousAttrValue = previousAttributes[attrName];
+			if (attrValue !== previousAttrValue) {
+				updateAttribute(domNode, attrName, attrValue, namespace);
+			}
+		}
+	}
+
+	function buildPreviousProperties(domNode: any, current: VNodeWrapper) {
+		const {
+			node: { diffType, properties, attributes }
+		} = current;
+		if (!diffType || diffType === 'vdom') {
+			return {
+				properties: current.deferredProperties
+					? { ...current.deferredProperties, ...current.node.properties }
+					: current.node.properties,
+				attributes: current.node.attributes,
+				events: current.node.events
+			};
+		} else if (diffType === 'none') {
+			return {
+				properties: {},
+				attributes: current.node.attributes ? {} : undefined,
+				events: current.node.events
+			};
+		}
+		let newProperties: any = {
+			properties: {}
+		};
+		if (attributes) {
+			newProperties.attributes = {};
+			newProperties.events = current.node.events;
+			Object.keys(properties).forEach((propName) => {
+				newProperties.properties[propName] = domNode[propName];
+			});
+			Object.keys(attributes).forEach((attrName) => {
+				newProperties.attributes[attrName] = domNode.getAttribute(attrName);
+			});
+			return newProperties;
+		}
+		newProperties.properties = Object.keys(properties).reduce(
+			(props, property) => {
+				props[property] = domNode.getAttribute(property) || domNode[property];
+				return props;
+			},
+			{} as any
+		);
+		return newProperties;
+	}
+
 	function updateEvent(
 		domNode: HTMLElement,
 		eventName: string,
@@ -1674,7 +1681,6 @@ export function renderer(renderer: () => RenderResult): Renderer {
 				ownerDocument: _mountOptions.ownerDocument,
 				properties
 			});
-			domNode.removeAttribute('class');
 		}
 
 		includesEventsAndAttributes && removeOrphanedEvents(domNode, currentProperties, properties);
@@ -2028,7 +2034,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 					} else if (_insertBeforeMap) {
 						insertBefore = _insertBeforeMap.get(next);
 					}
-					parentDomNode.insertBefore(domNode!, insertBefore);
+					_mountOptions.nodeApi.insertBefore(parentDomNode as any, domNode as any, insertBefore, {} as any);
 					if (isDomVNode(next.node) && next.node.onAttach) {
 						next.node.onAttach();
 					}
@@ -2059,7 +2065,10 @@ export function renderer(renderer: () => RenderResult): Renderer {
 					current: { domNode: currentDomNode }
 				} = item;
 				if (isTextNode(domNode) && isTextNode(currentDomNode) && domNode !== currentDomNode) {
-					currentDomNode.parentNode && currentDomNode.parentNode.replaceChild(domNode, currentDomNode);
+					const parent = _mountOptions.nodeApi.getParent(currentDomNode, {} as any);
+					if (parent) {
+						_mountOptions.nodeApi.replaceChild(parent, domNode, currentDomNode, {} as any);
+					}
 				} else {
 					const previousProperties = buildPreviousProperties(domNode, current);
 					processProperties(next, previousProperties);
@@ -2753,7 +2762,10 @@ export function renderer(renderer: () => RenderResult): Renderer {
 						if (isWNodeWrapper(wrapper) || isVirtualWrapper(wrapper)) {
 							specialIds.push(wrapper.id);
 						} else if (wrapper.domNode && wrapper.domNode.parentNode) {
-							wrapper.domNode.parentNode.removeChild(wrapper.domNode);
+							const parent = _mountOptions.nodeApi.getParent(wrapper.domNode, {} as any);
+							if (parent) {
+								_mountOptions.nodeApi.removeChild(parent, wrapper.domNode, {} as any);
+							}
 						}
 					} else if (isDomVNode(wrapper.node) && wrapper.node.onDetach) {
 						wrapper.node.onDetach();
