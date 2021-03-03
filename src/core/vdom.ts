@@ -250,8 +250,8 @@ const defaultNodeApi: MountOptions['nodeApi'] = {
 	getHead() {
 		return global.document.head;
 	},
-	getTag(domNode) {
-		return (domNode as any).tag;
+	getTag(domNode = { tagName: '' } as any) {
+		return (domNode as any).tagName;
 	},
 	create(tag) {
 		return global.document.createElement(tag);
