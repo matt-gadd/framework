@@ -216,11 +216,14 @@ export interface MountOptions {
 		getBody(): Node;
 		getHead(): Node;
 		create(tag: string): Node;
+		createWithNamespace(tag: string, namespace: string): Node;
+		createText(text: string): Text;
 		getProperty(domNode: Node, key: string): any;
 		setProperty(domNode: Node, key: string, value: any): void;
 		callProperty(domNode: Node, key: string): any;
 		getAttribute(domNode: Node, key: string): string | null;
 		setAttribute(domNode: Node, key: string, value: string): void;
+		setAttributeWithNamespace(domNode: Node, namespace: string, key: string, value: string): void;
 		setStyle(domNode: Node, key: string, value: string): void;
 		removeAttribute(domNode: Node, key: string): void;
 		insertBefore(domNode: Node, newNode: Node, referenceNode: Node): void;
@@ -228,6 +231,7 @@ export interface MountOptions {
 		addEvent(domNode: Node, name: string, callback: EventListener, eventOptions: any): void;
 		removeEvent(domNode: Node, name: string, callback: EventListener, eventOptions: any): void;
 		getParent(domNode: Node): Node | null;
+		getChildren(domNode: Node): NodeList;
 		replaceChild(domNode: Node, newChild: Node, oldChild: Node): void;
 		contains(domNode: Node, child: Node): boolean;
 		requestAnimationFrame(callback: () => void): number;
@@ -248,6 +252,12 @@ const defaultNodeApi: MountOptions['nodeApi'] = {
 	create(tag) {
 		return global.document.createElement(tag);
 	},
+	createText(text) {
+		return global.document.createTextNode(text);
+	},
+	createWithNamespace(tag, namespace) {
+		return global.document.createElementNS(tag, namespace);
+	},
 	getProperty(domNode, key) {
 		return (domNode as any)[key];
 	},
@@ -260,6 +270,9 @@ const defaultNodeApi: MountOptions['nodeApi'] = {
 	setAttribute(domNode, key, value) {
 		(domNode as any).setAttribute(key, value);
 	},
+	setAttributeWithNamespace(domNode, namespace, key, value) {
+		(domNode as any).setAttributeNS(namespace, key, value);
+	},
 	removeAttribute(domNode, key) {
 		(domNode as any).removeAttribute(key);
 	},
@@ -271,6 +284,9 @@ const defaultNodeApi: MountOptions['nodeApi'] = {
 	},
 	removeChild(domNode, childNode) {
 		domNode.removeChild(childNode);
+	},
+	getChildren(domNode) {
+		return domNode.childNodes;
 	},
 	addEvent(domNode, name, callback, options) {
 		has('dom-passive-event')
@@ -1349,16 +1365,18 @@ export function renderer(renderer: () => RenderResult): Renderer {
 			newProperties.attributes = {};
 			newProperties.events = current.node.events;
 			Object.keys(properties).forEach((propName) => {
-				newProperties.properties[propName] = domNode[propName];
+				newProperties.properties[propName] = _mountOptions.nodeApi.getProperty(domNode, propName);
 			});
 			Object.keys(attributes).forEach((attrName) => {
-				newProperties.attributes[attrName] = domNode.getAttribute(attrName);
+				newProperties.attributes[attrName] = _mountOptions.nodeApi.getAttribute(domNode, attrName);
 			});
 			return newProperties;
 		}
 		newProperties.properties = Object.keys(properties).reduce(
 			(props, property) => {
-				props[property] = domNode.getAttribute(property) || domNode[property];
+				props[property] =
+					_mountOptions.nodeApi.getAttribute(domNode, property) ||
+					_mountOptions.nodeApi.getProperty(domNode, property);
 				return props;
 			},
 			{} as any
@@ -1868,7 +1886,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 		_processQueue.push({
 			current: [],
 			next: [nextWrapper],
-			meta: { mergeNodes: arrayFrom(domNode.childNodes) }
+			meta: { mergeNodes: arrayFrom(_mountOptions.nodeApi.getChildren(domNode)) }
 		});
 		_runProcessQueue();
 		_runDomInstructionQueue();
@@ -2589,12 +2607,12 @@ export function renderer(renderer: () => RenderResult): Renderer {
 					next.domNode = _mountOptions.nodeApi.getHead();
 				} else if (next.node.tag && !isVirtual) {
 					if (next.namespace) {
-						next.domNode = global.document.createElementNS(next.namespace, next.node.tag);
+						next.domNode = _mountOptions.nodeApi.createWithNamespace(next.namespace, next.node.tag);
 					} else {
 						next.domNode = _mountOptions.nodeApi.create(next.node.tag);
 					}
 				} else if (next.node.text != null) {
-					next.domNode = global.document.createTextNode(next.node.text);
+					next.domNode = _mountOptions.nodeApi.createText(next.node.text);
 				}
 			}
 			if (_insertBeforeMap && _allMergedNodes.length) {
@@ -2611,7 +2629,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 					next.merged = false;
 				}
 			} else {
-				mergeNodes = arrayFrom(next.domNode.childNodes);
+				mergeNodes = arrayFrom(_mountOptions.nodeApi.getChildren(next.domNode));
 				_allMergedNodes = [..._allMergedNodes, ...mergeNodes];
 			}
 		}
@@ -2658,7 +2676,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 		let children: DNodeWrapper[] | undefined;
 		let currentChildren = _idToChildrenWrappers.get(next.id);
 		if (next.node.text != null && next.node.text !== current.node.text) {
-			next.domNode = global.document.createTextNode(next.node.text);
+			next.domNode = _mountOptions.nodeApi.createText(next.node.text);
 		} else if (next.node.children) {
 			children = renderedToWrapper(next.node.children, next, current);
 			_idToChildrenWrappers.set(next.id, children);
@@ -2731,7 +2749,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 					} else if (specialIds.indexOf(wrapper.parentId) !== -1) {
 						if (isWNodeWrapper(wrapper) || isVirtualWrapper(wrapper)) {
 							specialIds.push(wrapper.id);
-						} else if (wrapper.domNode && wrapper.domNode.parentNode) {
+						} else if (wrapper.domNode && _mountOptions.nodeApi.getParent(wrapper.domNode)) {
 							const parent = _mountOptions.nodeApi.getParent(wrapper.domNode);
 							if (parent) {
 								_mountOptions.nodeApi.removeChild(parent, wrapper.domNode);
