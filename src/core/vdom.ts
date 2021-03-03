@@ -237,6 +237,7 @@ export interface MountOptions {
 		contains(domNode: Node, child: Node): boolean;
 		requestAnimationFrame(callback: () => void): number;
 		cancelAnimationFrame(id: number): void;
+		isTextNode(domNode?: Node): domNode is Text;
 	};
 }
 
@@ -317,6 +318,9 @@ const defaultNodeApi: MountOptions['nodeApi'] = {
 	},
 	callProperty(domNode, property) {
 		(domNode as any)[property]();
+	},
+	isTextNode(domNode): domNode is Text {
+		return !!(domNode && domNode.nodeType === 3);
 	}
 };
 
@@ -753,6 +757,7 @@ function checkDistinguishable(wrappers: DNodeWrapper[], index: number, parentWNo
 function same(dnode1: DNodeWrapper, dnode2: DNodeWrapper): boolean {
 	if (isVNodeWrapper(dnode1) && isVNodeWrapper(dnode2)) {
 		if (isDomVNode(dnode1.node) && isDomVNode(dnode2.node)) {
+			// node api equals
 			if (dnode1.node.domNode !== dnode2.node.domNode) {
 				return false;
 			}
@@ -2065,7 +2070,11 @@ export function renderer(renderer: () => RenderResult): Renderer {
 					current,
 					current: { domNode: currentDomNode }
 				} = item;
-				if (isTextNode(domNode) && isTextNode(currentDomNode) && domNode !== currentDomNode) {
+				if (
+					_mountOptions.nodeApi.isTextNode(domNode) &&
+					_mountOptions.nodeApi.isTextNode(currentDomNode) &&
+					domNode !== currentDomNode
+				) {
 					const parent = _mountOptions.nodeApi.getParent(currentDomNode);
 					if (parent) {
 						_mountOptions.nodeApi.replaceChild(parent, domNode, currentDomNode);
@@ -2632,8 +2641,8 @@ export function renderer(renderer: () => RenderResult): Renderer {
 			}
 		} else if (_mountOptions.merge) {
 			next.merged = true;
-			if (isTextNode(next.domNode)) {
-				if (next.domNode.data !== next.node.text) {
+			if (_mountOptions.nodeApi.isTextNode(next.domNode)) {
+				if (_mountOptions.nodeApi.getProperty(next.domNode, 'data') !== next.node.text) {
 					_allMergedNodes = [next.domNode, ..._allMergedNodes];
 					next.domNode = global.document.createTextNode(next.node.text);
 					next.merged = false;
