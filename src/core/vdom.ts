@@ -2096,9 +2096,9 @@ export function renderer(renderer: () => RenderResult): Renderer {
 				const { exitAnimation, exitAnimationActive } = current.node.properties;
 				if (_mountOptions.transition && exitAnimation && exitAnimation !== true) {
 					_mountOptions.transition.exit(current.domNode as HTMLElement, exitAnimation, exitAnimationActive);
-				} else {
-					const parent = _mountOptions.nodeApi.getParent((current as any).domNode);
-					_mountOptions.nodeApi.removeChild(parent!, (current as any).domNode);
+				} else if (current.domNode) {
+					const parent = _mountOptions.nodeApi.getParent(current.domNode);
+					_mountOptions.nodeApi.removeChild(parent!, current.domNode);
 				}
 				if (isDomVNode(current.node) && current.node.onDetach) {
 					current.node.onDetach();
