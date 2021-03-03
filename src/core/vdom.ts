@@ -211,7 +211,6 @@ export interface MountOptions {
 	transition?: TransitionStrategy;
 	domNode?: HTMLElement | null;
 	registry: Registry;
-	ownerDocument?: Document;
 	nodeApi?: {
 		getDocument(): Node;
 		getBody(): Node;
@@ -1838,14 +1837,13 @@ export function renderer(renderer: () => RenderResult): Renderer {
 	function mount(mountOptions: Partial<MountOptions> = {}) {
 		let domNode = mountOptions.domNode;
 		const nodeApi: any = mountOptions.nodeApi || defaultNodeApi;
-		const ownerDocument = mountOptions.ownerDocument || nodeApi.getDocument();
 		if (!domNode) {
 			if (has('dojo-debug') && domNode === null) {
 				console.warn('Unable to find node to mount the application, defaulting to the document body.');
 			}
-			domNode = ownerDocument.body as HTMLElement;
+			domNode = nodeApi.getBody() as HTMLElement;
 		}
-		_mountOptions = { ..._mountOptions, ...mountOptions, domNode, ownerDocument, nodeApi };
+		_mountOptions = { ..._mountOptions, ...mountOptions, domNode, nodeApi };
 		const renderResult = wrapNodes(renderer)({}, []);
 		_appWrapperId = `${wrapperId++}`;
 		const nextWrapper = {
@@ -2592,7 +2590,6 @@ export function renderer(renderer: () => RenderResult): Renderer {
 				} else if (next.node.tag && !isVirtual) {
 					if (next.namespace) {
 						next.domNode = global.document.createElementNS(next.namespace, next.node.tag);
-						/*next.domNode = _mountOptions.nodeApi.create(next.node.tag, namespace, { properties: next.node.properties, ownerDocument: _mountOptions.ownerDocument });*/
 					} else {
 						next.domNode = _mountOptions.nodeApi.create(next.node.tag);
 					}
