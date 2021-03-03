@@ -2041,7 +2041,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 					} else if (_insertBeforeMap) {
 						insertBefore = _insertBeforeMap.get(next);
 					}
-					_mountOptions.nodeApi.insertBefore(parentDomNode as any, domNode as any, insertBefore);
+					_mountOptions.nodeApi.insertBefore(parentDomNode, domNode!, insertBefore);
 					if (isDomVNode(next.node) && next.node.onAttach) {
 						next.node.onAttach();
 					}
