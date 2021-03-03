@@ -238,7 +238,7 @@ export interface MountOptions {
 		requestAnimationFrame(callback: () => void): number;
 		cancelAnimationFrame(id: number): void;
 		isTextNode(domNode?: Node): domNode is Text;
-		same(nodeA: Node, nodeB: Node): boolean;
+		equals(nodeA: Node, nodeB: Node): boolean;
 	};
 }
 
@@ -323,7 +323,7 @@ const defaultNodeApi: MountOptions['nodeApi'] = {
 	isTextNode(domNode): domNode is Text {
 		return !!(domNode && domNode.nodeType === 3);
 	},
-	same(nodeA, nodeB) {
+	equals(nodeA, nodeB) {
 		return nodeA === nodeB;
 	}
 };
@@ -1241,8 +1241,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 	function same(dnode1: DNodeWrapper, dnode2: DNodeWrapper): boolean {
 		if (isVNodeWrapper(dnode1) && isVNodeWrapper(dnode2)) {
 			if (isDomVNode(dnode1.node) && isDomVNode(dnode2.node)) {
-				// node api equals
-				if (!_mountOptions.nodeApi.same(dnode1.node.domNode, dnode2.node.domNode)) {
+				if (!_mountOptions.nodeApi.equals(dnode1.node.domNode, dnode2.node.domNode)) {
 					return false;
 				}
 			}
