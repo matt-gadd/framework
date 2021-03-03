@@ -218,12 +218,17 @@ export interface MountOptions {
 	registry: Registry;
 	ownerDocument?: Document;
 	nodeApi?: {
+		getDocument(): Node;
+		getBody(): Node;
+		getHead(): Node;
 		create(tag: string, options: NodeApiOptions): Node;
 		getProperty(domNode: Node, key: string, options: NodeApiOptions): any;
 		setProperty(domNode: Node, key: string, value: any, options: NodeApiOptions): void;
-		getAttribute(domNode: HTMLElement, key: string): string | null;
-		setAttribute(domNode: HTMLElement, key: string, value: string, options: NodeApiOptions): void;
-		removeAttribute(domNode: HTMLElement, key: string, options: NodeApiOptions): void;
+		callProperty(domNode: Node, key: string): any;
+		getAttribute(domNode: Node, key: string): string | null;
+		setAttribute(domNode: Node, key: string, value: string, options: NodeApiOptions): void;
+		setStyle(domNode: Node, key: string, value: string, options: NodeApiOptions): void;
+		removeAttribute(domNode: Node, key: string, options: NodeApiOptions): void;
 		insertBefore(domNode: Node, newNode: Node, referenceNode: Node, options: NodeApiOptions): void;
 		removeChild(domNode: Node, childNode: Node, options: NodeApiOptions): void;
 		addEvent(
@@ -249,6 +254,15 @@ export interface MountOptions {
 }
 
 const defaultNodeApi: MountOptions['nodeApi'] = {
+	getDocument() {
+		return global.document;
+	},
+	getBody() {
+		return document.body;
+	},
+	getHead() {
+		return document.head;
+	},
 	create(tag, { ownerDocument }) {
 		return ownerDocument.createElement(tag);
 	},
@@ -259,13 +273,16 @@ const defaultNodeApi: MountOptions['nodeApi'] = {
 		(domNode as any)[key] = value;
 	},
 	getAttribute(domNode, key) {
-		return domNode.getAttribute(key);
+		return (domNode as any).getAttribute(key);
 	},
 	setAttribute(domNode, key, value) {
-		domNode.setAttribute(key, value);
+		(domNode as any).setAttribute(key, value);
 	},
 	removeAttribute(domNode, key) {
-		domNode.removeAttribute(key);
+		(domNode as any).removeAttribute(key);
+	},
+	setStyle(domNode, key, value) {
+		(domNode as any).style[key] = value || '';
 	},
 	insertBefore(domNode, newNode, referenceNode) {
 		domNode.insertBefore(newNode, referenceNode);
@@ -295,6 +312,9 @@ const defaultNodeApi: MountOptions['nodeApi'] = {
 	},
 	cancelAnimationFrame(number) {
 		return global.cancelAnimationFrame(number);
+	},
+	callProperty(domNode, property) {
+		(domNode as any)[property]();
 	}
 };
 
@@ -1288,18 +1308,18 @@ export function renderer(renderer: () => RenderResult): Renderer {
 		}
 		if (result === true) {
 			_deferredRenderCallbacks.push(() => {
-				domNode[propName]();
+				_mountOptions.nodeApi.callProperty(domNode, propName);
 			});
 		}
 	}
 
-	function updateAttribute(domNode: Element, attrName: string, attrValue: string | undefined, namespace?: string) {
+	function updateAttribute(domNode: Node, attrName: string, attrValue: string | undefined, namespace?: string) {
 		if (namespace === NAMESPACE_SVG && attrName === 'href' && attrValue) {
-			domNode.setAttributeNS(NAMESPACE_XLINK, attrName, attrValue);
+			(domNode as any).setAttributeNS(NAMESPACE_XLINK, attrName, attrValue);
 		} else if ((attrName === 'role' && attrValue === '') || attrValue === undefined) {
-			domNode.removeAttribute(attrName);
+			_mountOptions.nodeApi.removeAttribute(domNode, attrName, {} as any);
 		} else {
-			domNode.setAttribute(attrName, attrValue);
+			_mountOptions.nodeApi.setAttribute(domNode, attrName, attrValue, {} as any);
 		}
 	}
 
@@ -1650,18 +1670,18 @@ export function renderer(renderer: () => RenderResult): Renderer {
 	}
 
 	function setValue(domNode: any, propValue?: any, previousValue?: any) {
-		const domValue = domNode.value;
-		const onInputValue = domNode['oninput-value'];
-		const onSelectValue = domNode['select-value'];
+		const domValue = _mountOptions.nodeApi.getProperty(domNode, 'value', {} as any);
+		const onInputValue = _mountOptions.nodeApi.getProperty(domNode, 'oninput-value', {} as any);
+		const onSelectValue = _mountOptions.nodeApi.getProperty(domNode, 'select-value', {} as any);
 
 		if (onSelectValue && domValue !== onSelectValue) {
 			domNode.value = onSelectValue;
 			if (domNode.value === onSelectValue) {
-				domNode['select-value'] = undefined;
+				_mountOptions.nodeApi.setProperty(domNode, 'select-value', undefined, {} as any);
 			}
 		} else if ((onInputValue && domValue === onInputValue) || propValue !== previousValue) {
-			domNode.value = propValue;
-			domNode['oninput-value'] = undefined;
+			_mountOptions.nodeApi.setProperty(domNode, 'value', propValue, {} as any);
+			_mountOptions.nodeApi.setProperty(domNode, 'oninput-value', undefined, {} as any);
 		}
 	}
 
@@ -1725,7 +1745,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 					if (newStyleValue === oldStyleValue) {
 						continue;
 					}
-					(domNode.style as any)[styleName] = newStyleValue || '';
+					_mountOptions.nodeApi.setStyle(domNode, styleName, newStyleValue || '', {} as any);
 				}
 			} else {
 				if (!propValue && typeof previousValue === 'string') {
@@ -1792,7 +1812,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 				run();
 			} else {
 				let id: number;
-				id = global.requestAnimationFrame(() => {
+				id = _mountOptions.nodeApi.requestAnimationFrame(() => {
 					_deferredProcessIds.delete(id);
 					run();
 				});
@@ -1835,12 +1855,12 @@ export function renderer(renderer: () => RenderResult): Renderer {
 			meta: {}
 		});
 		if (_renderScheduled) {
-			global.cancelAnimationFrame(_renderScheduled);
+			_mountOptions.nodeApi.cancelAnimationFrame(_renderScheduled);
 		}
 		_runProcessQueue();
 		_runDomInstructionQueue();
 		_deferredProcessIds.forEach((callback, id) => {
-			global.cancelAnimationFrame(id);
+			_mountOptions.nodeApi.cancelAnimationFrame(id);
 			callback();
 		});
 		const run = _createDeferredRenderCallback();
@@ -1861,8 +1881,8 @@ export function renderer(renderer: () => RenderResult): Renderer {
 
 	function mount(mountOptions: Partial<MountOptions> = {}) {
 		let domNode = mountOptions.domNode;
-		const ownerDocument = mountOptions.ownerDocument || global.document;
 		const nodeApi: any = mountOptions.nodeApi || defaultNodeApi;
+		const ownerDocument = mountOptions.ownerDocument || nodeApi.getDocument();
 		if (!domNode) {
 			if (has('dojo-debug') && domNode === null) {
 				console.warn('Unable to find node to mount the application, defaulting to the document body.');
@@ -1916,7 +1936,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 			_runInvalidationQueue();
 		} else if (!_renderScheduled) {
 			setRendering(true);
-			_renderScheduled = global.requestAnimationFrame(() => {
+			_renderScheduled = _mountOptions.nodeApi.requestAnimationFrame(() => {
 				_runInvalidationQueue();
 			});
 		}
@@ -2610,9 +2630,9 @@ export function renderer(renderer: () => RenderResult): Renderer {
 					next.namespace = NAMESPACE_SVG;
 				}
 				if (isBody) {
-					next.domNode = global.document.body;
+					next.domNode = _mountOptions.nodeApi.getBody();
 				} else if (isHead) {
-					next.domNode = global.document.head;
+					next.domNode = _mountOptions.nodeApi.getHead();
 				} else if (next.node.tag && !isVirtual) {
 					if (next.namespace) {
 						next.domNode = global.document.createElementNS(next.namespace, next.node.tag);
