@@ -215,6 +215,7 @@ export interface MountOptions {
 		getDocument(): Node;
 		getBody(): Node;
 		getHead(): Node;
+		getTag(domNode: Node): string;
 		create(tag: string): Node;
 		createWithNamespace(tag: string, namespace: string): Node;
 		createText(text: string): Text;
@@ -229,7 +230,7 @@ export interface MountOptions {
 		insertBefore(domNode: Node, newNode: Node, referenceNode: Node): void;
 		removeChild(domNode: Node, childNode: Node): void;
 		addEvent(domNode: Node, name: string, callback: EventListener, eventOptions: any): void;
-		removeEvent(domNode: Node, name: string, callback: EventListener, eventOptions: any): void;
+		removeEvent(domNode: Node, name: string, callback: EventListener): void;
 		getParent(domNode: Node): Node | null;
 		getChildren(domNode: Node): NodeList;
 		replaceChild(domNode: Node, newChild: Node, oldChild: Node): void;
@@ -244,10 +245,13 @@ const defaultNodeApi: MountOptions['nodeApi'] = {
 		return global.document;
 	},
 	getBody() {
-		return document.body;
+		return global.document.body;
 	},
 	getHead() {
-		return document.head;
+		return global.document.head;
+	},
+	getTag(domNode) {
+		return (domNode as any).tag;
 	},
 	create(tag) {
 		return global.document.createElement(tag);
@@ -1313,7 +1317,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 
 	function updateAttribute(domNode: Node, attrName: string, attrValue: string | undefined, namespace?: string) {
 		if (namespace === NAMESPACE_SVG && attrName === 'href' && attrValue) {
-			(domNode as any).setAttributeNS(NAMESPACE_XLINK, attrName, attrValue);
+			_mountOptions.nodeApi.setAttributeWithNamespace(domNode, NAMESPACE_XLINK, attrName, attrValue);
 		} else if ((attrName === 'role' && attrValue === '') || attrValue === undefined) {
 			_mountOptions.nodeApi.removeAttribute(domNode, attrName);
 		} else {
@@ -1409,7 +1413,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 		const options = { passive: isPassive };
 
 		if (proxyEvent && proxyEvent.options.passive !== isPassive) {
-			domNode.removeEventListener(eventName, proxyEvent.proxy);
+			_mountOptions.nodeApi.removeEvent(domNode, eventName, proxyEvent.proxy);
 			proxyEvent = undefined;
 		}
 
@@ -1441,7 +1445,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 				const proxyEvents = _eventMap.get(domNode) || {};
 				let proxyEvent = proxyEvents[eventName];
 				if (proxyEvent) {
-					_mountOptions.nodeApi.removeEvent(domNode, eventName, proxyEvent.proxy, {});
+					_mountOptions.nodeApi.removeEvent(domNode, eventName, proxyEvent.proxy);
 					delete proxyEvents[eventName];
 					_eventMap.set(domNode, proxyEvents);
 				}
@@ -1645,7 +1649,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 						}
 					}
 				}
-				if (!nextSibling.reparent && domNode && domNode.parentNode) {
+				if (!nextSibling.reparent && domNode && _mountOptions.nodeApi.getParent(domNode)) {
 					insertBefore = domNode;
 					break;
 				}
@@ -1666,8 +1670,8 @@ export function renderer(renderer: () => RenderResult): Renderer {
 		const onSelectValue = _mountOptions.nodeApi.getProperty(domNode, 'select-value');
 
 		if (onSelectValue && domValue !== onSelectValue) {
-			domNode.value = onSelectValue;
-			if (domNode.value === onSelectValue) {
+			_mountOptions.nodeApi.setProperty(domNode, 'value', onSelectValue);
+			if (domValue === onSelectValue) {
 				_mountOptions.nodeApi.setProperty(domNode, 'select-value', undefined);
 			}
 		} else if ((onInputValue && domValue === onInputValue) || propValue !== previousValue) {
@@ -1703,7 +1707,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 				if (previousClassString !== currentClassString) {
 					if (currentClassString) {
 						if (nextWrapper.merged) {
-							const domClasses = (domNode.getAttribute('class') || '').split(' ');
+							const domClasses = (_mountOptions.nodeApi.getAttribute(domNode, 'class') || '').split(' ');
 							for (let i = 0; i < domClasses.length; i++) {
 								if (currentClassString.indexOf(domClasses[i]) === -1) {
 									currentClassString = `${domClasses[i]} ${currentClassString}`;
@@ -1752,7 +1756,8 @@ export function renderer(renderer: () => RenderResult): Renderer {
 						if (type === 'string' && propName !== 'innerHTML' && includesEventsAndAttributes) {
 							updateAttribute(domNode, propName, propValue, nextWrapper.namespace);
 						} else if (propName === 'scrollLeft' || propName === 'scrollTop') {
-							if ((domNode as any)[propName] !== propValue) {
+							const currentValue = _mountOptions.nodeApi.getProperty(domNode, propName);
+							if (currentValue !== propValue) {
 								_mountOptions.nodeApi.setProperty(domNode, propName, propValue);
 							}
 						} else {
@@ -1988,7 +1993,8 @@ export function renderer(renderer: () => RenderResult): Renderer {
 		if (_deferredProcessQueue.length === 0) {
 			let mergedNode: Node | undefined;
 			while ((mergedNode = _allMergedNodes.pop())) {
-				mergedNode.parentNode && mergedNode.parentNode.removeChild(mergedNode);
+				const parent = _mountOptions.nodeApi.getParent(mergedNode);
+				parent && _mountOptions.nodeApi.removeChild(parent, mergedNode);
 			}
 			_mountOptions.merge = false;
 		}
@@ -2031,8 +2037,10 @@ export function renderer(renderer: () => RenderResult): Renderer {
 						next.node.onAttach();
 					}
 				}
-				if ((domNode as HTMLElement).tagName === 'OPTION' && domNode!.parentNode) {
-					setValue(domNode!.parentNode);
+				const parentNode = _mountOptions.nodeApi.getParent(domNode!);
+				const tagName = _mountOptions.nodeApi.getTag(domNode!);
+				if (tagName === 'OPTION' && parentNode) {
+					setValue(parentNode);
 				}
 				const { enterAnimation, enterAnimationActive } = node.properties;
 				if (_mountOptions.transition && enterAnimation && enterAnimation !== true) {
@@ -2075,7 +2083,8 @@ export function renderer(renderer: () => RenderResult): Renderer {
 				if (_mountOptions.transition && exitAnimation && exitAnimation !== true) {
 					_mountOptions.transition.exit(current.domNode as HTMLElement, exitAnimation, exitAnimationActive);
 				} else {
-					current.domNode!.parentNode!.removeChild(current.domNode!);
+					const parent = _mountOptions.nodeApi.getParent((current as any).domNode);
+					_mountOptions.nodeApi.removeChild(parent!, (current as any).domNode);
 				}
 				if (isDomVNode(current.node) && current.node.onDetach) {
 					current.node.onDetach();
@@ -2474,7 +2483,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 		next.id = id;
 		next.properties = { ...next.node.properties };
 		_wrapperSiblingMap.delete(current);
-		if (domNode && domNode.parentNode) {
+		if (domNode && _mountOptions.nodeApi.getParent(domNode)) {
 			next.domNode = domNode;
 		}
 
