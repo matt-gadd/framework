@@ -238,6 +238,7 @@ export interface MountOptions {
 		requestAnimationFrame(callback: () => void): number;
 		cancelAnimationFrame(id: number): void;
 		isTextNode(domNode?: Node): domNode is Text;
+		same(nodeA: Node, nodeB: Node): boolean;
 	};
 }
 
@@ -321,6 +322,9 @@ const defaultNodeApi: MountOptions['nodeApi'] = {
 	},
 	isTextNode(domNode): domNode is Text {
 		return !!(domNode && domNode.nodeType === 3);
+	},
+	same(nodeA, nodeB) {
+		return nodeA === nodeB;
 	}
 };
 
@@ -716,92 +720,6 @@ export function propertiesDiff(current: any, next: any, invalidator: () => void,
 		}
 		ignoreProperties.push(propertyNames[i]);
 	}
-}
-
-function checkDistinguishable(wrappers: DNodeWrapper[], index: number, parentWNodeWrapper?: WNodeWrapper) {
-	const wrapperToCheck = wrappers[index];
-	if (isVNodeWrapper(wrapperToCheck) && !wrapperToCheck.node.tag) {
-		return;
-	}
-	const { key } = wrapperToCheck.node.properties;
-	let parentName = 'unknown';
-	if (parentWNodeWrapper) {
-		const {
-			node: { widgetConstructor }
-		} = parentWNodeWrapper;
-		parentName = (widgetConstructor as any).name || 'unknown';
-	}
-
-	if (key === undefined || key === null) {
-		for (let i = 0; i < wrappers.length; i++) {
-			if (i !== index) {
-				const wrapper = wrappers[i];
-				if (same(wrapper, wrapperToCheck)) {
-					let nodeIdentifier: string;
-					if (isWNodeWrapper(wrapper)) {
-						nodeIdentifier = (wrapper.node.widgetConstructor as any).name || 'unknown';
-					} else {
-						nodeIdentifier = wrapper.node.tag;
-					}
-
-					console.warn(
-						`A widget (${parentName}) has had a child added or removed, but they were not able to uniquely identified. It is recommended to provide a unique 'key' property when using the same widget or element (${nodeIdentifier}) multiple times as siblings`
-					);
-					break;
-				}
-			}
-		}
-	}
-}
-
-function same(dnode1: DNodeWrapper, dnode2: DNodeWrapper): boolean {
-	if (isVNodeWrapper(dnode1) && isVNodeWrapper(dnode2)) {
-		if (isDomVNode(dnode1.node) && isDomVNode(dnode2.node)) {
-			// node api equals
-			if (dnode1.node.domNode !== dnode2.node.domNode) {
-				return false;
-			}
-		}
-		if (dnode1.node.tag !== dnode2.node.tag) {
-			return false;
-		}
-		if (dnode1.node.properties.key !== dnode2.node.properties.key) {
-			return false;
-		}
-		return true;
-	} else if (isWNodeWrapper(dnode1) && isWNodeWrapper(dnode2)) {
-		const widgetConstructor1 = dnode1.registryItem || dnode1.node.widgetConstructor;
-		const widgetConstructor2 = dnode2.registryItem || dnode2.node.widgetConstructor;
-		const {
-			node: { properties: props1 }
-		} = dnode1;
-		const {
-			node: { properties: props2 }
-		} = dnode2;
-		if (dnode1.instance === undefined && typeof widgetConstructor2 === 'string') {
-			return false;
-		}
-		if (widgetConstructor1 !== widgetConstructor2) {
-			return false;
-		}
-		if (props1.key !== props2.key) {
-			return false;
-		}
-		if (!((widgetConstructor1 as any).keys || []).every((key: string) => props1[key] === props2[key])) {
-			return false;
-		}
-		return true;
-	}
-	return false;
-}
-
-function findIndexOfChild(children: DNodeWrapper[], sameAs: DNodeWrapper, start: number) {
-	for (let i = start; i < children.length; i++) {
-		if (same(children[i], sameAs)) {
-			return i;
-		}
-	}
-	return -1;
 }
 
 function createClassPropValue(classes: SupportedClassName | SupportedClassName[] = []) {
@@ -1317,6 +1235,92 @@ export function renderer(renderer: () => RenderResult): Renderer {
 			_deferredRenderCallbacks.push(() => {
 				_mountOptions.nodeApi.callProperty(domNode, propName);
 			});
+		}
+	}
+
+	function same(dnode1: DNodeWrapper, dnode2: DNodeWrapper): boolean {
+		if (isVNodeWrapper(dnode1) && isVNodeWrapper(dnode2)) {
+			if (isDomVNode(dnode1.node) && isDomVNode(dnode2.node)) {
+				// node api equals
+				if (!_mountOptions.nodeApi.same(dnode1.node.domNode, dnode2.node.domNode)) {
+					return false;
+				}
+			}
+			if (dnode1.node.tag !== dnode2.node.tag) {
+				return false;
+			}
+			if (dnode1.node.properties.key !== dnode2.node.properties.key) {
+				return false;
+			}
+			return true;
+		} else if (isWNodeWrapper(dnode1) && isWNodeWrapper(dnode2)) {
+			const widgetConstructor1 = dnode1.registryItem || dnode1.node.widgetConstructor;
+			const widgetConstructor2 = dnode2.registryItem || dnode2.node.widgetConstructor;
+			const {
+				node: { properties: props1 }
+			} = dnode1;
+			const {
+				node: { properties: props2 }
+			} = dnode2;
+			if (dnode1.instance === undefined && typeof widgetConstructor2 === 'string') {
+				return false;
+			}
+			if (widgetConstructor1 !== widgetConstructor2) {
+				return false;
+			}
+			if (props1.key !== props2.key) {
+				return false;
+			}
+			if (!((widgetConstructor1 as any).keys || []).every((key: string) => props1[key] === props2[key])) {
+				return false;
+			}
+			return true;
+		}
+		return false;
+	}
+
+	function findIndexOfChild(children: DNodeWrapper[], sameAs: DNodeWrapper, start: number) {
+		for (let i = start; i < children.length; i++) {
+			if (same(children[i], sameAs)) {
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	function checkDistinguishable(wrappers: DNodeWrapper[], index: number, parentWNodeWrapper?: WNodeWrapper) {
+		const wrapperToCheck = wrappers[index];
+		if (isVNodeWrapper(wrapperToCheck) && !wrapperToCheck.node.tag) {
+			return;
+		}
+		const { key } = wrapperToCheck.node.properties;
+		let parentName = 'unknown';
+		if (parentWNodeWrapper) {
+			const {
+				node: { widgetConstructor }
+			} = parentWNodeWrapper;
+			parentName = (widgetConstructor as any).name || 'unknown';
+		}
+
+		if (key === undefined || key === null) {
+			for (let i = 0; i < wrappers.length; i++) {
+				if (i !== index) {
+					const wrapper = wrappers[i];
+					if (same(wrapper, wrapperToCheck)) {
+						let nodeIdentifier: string;
+						if (isWNodeWrapper(wrapper)) {
+							nodeIdentifier = (wrapper.node.widgetConstructor as any).name || 'unknown';
+						} else {
+							nodeIdentifier = wrapper.node.tag;
+						}
+
+						console.warn(
+							`A widget (${parentName}) has had a child added or removed, but they were not able to uniquely identified. It is recommended to provide a unique 'key' property when using the same widget or element (${nodeIdentifier}) multiple times as siblings`
+						);
+						break;
+					}
+				}
+			}
 		}
 	}
 
