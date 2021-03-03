@@ -1738,7 +1738,8 @@ export function renderer(renderer: () => RenderResult): Renderer {
 					propValue = '';
 				}
 				if (propName === 'value') {
-					if ((domNode as HTMLElement).tagName === 'SELECT') {
+					const tagName = _mountOptions.nodeApi.getTag(domNode);
+					if (tagName === 'SELECT') {
 						_mountOptions.nodeApi.setProperty(domNode, 'select-value', propValue);
 					}
 					setValue(domNode, propValue, previousValue);
