@@ -205,11 +205,6 @@ export interface VNodeWrapper extends BaseNodeWrapper {
 
 export type DNodeWrapper = VNodeWrapper | WNodeWrapper;
 
-interface NodeApiOptions {
-	ownerDocument: Document;
-	properties: VNodeProperties;
-}
-
 export interface MountOptions {
 	sync: boolean;
 	merge: boolean;
@@ -221,32 +216,20 @@ export interface MountOptions {
 		getDocument(): Node;
 		getBody(): Node;
 		getHead(): Node;
-		create(tag: string, options: NodeApiOptions): Node;
-		getProperty(domNode: Node, key: string, options: NodeApiOptions): any;
-		setProperty(domNode: Node, key: string, value: any, options: NodeApiOptions): void;
+		create(tag: string): Node;
+		getProperty(domNode: Node, key: string): any;
+		setProperty(domNode: Node, key: string, value: any): void;
 		callProperty(domNode: Node, key: string): any;
 		getAttribute(domNode: Node, key: string): string | null;
-		setAttribute(domNode: Node, key: string, value: string, options: NodeApiOptions): void;
-		setStyle(domNode: Node, key: string, value: string, options: NodeApiOptions): void;
-		removeAttribute(domNode: Node, key: string, options: NodeApiOptions): void;
-		insertBefore(domNode: Node, newNode: Node, referenceNode: Node, options: NodeApiOptions): void;
-		removeChild(domNode: Node, childNode: Node, options: NodeApiOptions): void;
-		addEvent(
-			domNode: Node,
-			name: string,
-			callback: EventListener,
-			eventOptions: any,
-			options: NodeApiOptions
-		): void;
-		removeEvent(
-			domNode: Node,
-			name: string,
-			callback: EventListener,
-			eventOptions: any,
-			options: NodeApiOptions
-		): void;
-		getParent(domNode: Node, options: NodeApiOptions): Node | null;
-		replaceChild(domNode: Node, newChild: Node, oldChild: Node, options: NodeApiOptions): void;
+		setAttribute(domNode: Node, key: string, value: string): void;
+		setStyle(domNode: Node, key: string, value: string): void;
+		removeAttribute(domNode: Node, key: string): void;
+		insertBefore(domNode: Node, newNode: Node, referenceNode: Node): void;
+		removeChild(domNode: Node, childNode: Node): void;
+		addEvent(domNode: Node, name: string, callback: EventListener, eventOptions: any): void;
+		removeEvent(domNode: Node, name: string, callback: EventListener, eventOptions: any): void;
+		getParent(domNode: Node): Node | null;
+		replaceChild(domNode: Node, newChild: Node, oldChild: Node): void;
 		contains(domNode: Node, child: Node): boolean;
 		requestAnimationFrame(callback: () => void): number;
 		cancelAnimationFrame(id: number): void;
@@ -263,8 +246,8 @@ const defaultNodeApi: MountOptions['nodeApi'] = {
 	getHead() {
 		return document.head;
 	},
-	create(tag, { ownerDocument }) {
-		return ownerDocument.createElement(tag);
+	create(tag) {
+		return global.document.createElement(tag);
 	},
 	getProperty(domNode, key) {
 		return (domNode as any)[key];
@@ -1317,9 +1300,9 @@ export function renderer(renderer: () => RenderResult): Renderer {
 		if (namespace === NAMESPACE_SVG && attrName === 'href' && attrValue) {
 			(domNode as any).setAttributeNS(NAMESPACE_XLINK, attrName, attrValue);
 		} else if ((attrName === 'role' && attrValue === '') || attrValue === undefined) {
-			_mountOptions.nodeApi.removeAttribute(domNode, attrName, {} as any);
+			_mountOptions.nodeApi.removeAttribute(domNode, attrName);
 		} else {
-			_mountOptions.nodeApi.setAttribute(domNode, attrName, attrValue, {} as any);
+			_mountOptions.nodeApi.setAttribute(domNode, attrName, attrValue);
 		}
 	}
 
@@ -1423,10 +1406,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 				proxyEvent && proxyEvent.callback(...args);
 			};
 			proxyEvents[eventName] = { callback, proxy, options };
-			_mountOptions.nodeApi.addEvent(domNode, eventName, proxy, options, {
-				ownerDocument: _mountOptions.ownerDocument,
-				properties: {}
-			});
+			_mountOptions.nodeApi.addEvent(domNode, eventName, proxy, options);
 			_eventMap.set(domNode, proxyEvents);
 		}
 	}
@@ -1444,13 +1424,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 				const proxyEvents = _eventMap.get(domNode) || {};
 				let proxyEvent = proxyEvents[eventName];
 				if (proxyEvent) {
-					_mountOptions.nodeApi.removeEvent(
-						domNode,
-						eventName,
-						proxyEvent.proxy,
-						{},
-						{ ownerDocument: _mountOptions.ownerDocument, properties }
-					);
+					_mountOptions.nodeApi.removeEvent(domNode, eventName, proxyEvent.proxy, {});
 					delete proxyEvents[eventName];
 					_eventMap.set(domNode, proxyEvents);
 				}
@@ -1670,18 +1644,18 @@ export function renderer(renderer: () => RenderResult): Renderer {
 	}
 
 	function setValue(domNode: any, propValue?: any, previousValue?: any) {
-		const domValue = _mountOptions.nodeApi.getProperty(domNode, 'value', {} as any);
-		const onInputValue = _mountOptions.nodeApi.getProperty(domNode, 'oninput-value', {} as any);
-		const onSelectValue = _mountOptions.nodeApi.getProperty(domNode, 'select-value', {} as any);
+		const domValue = _mountOptions.nodeApi.getProperty(domNode, 'value');
+		const onInputValue = _mountOptions.nodeApi.getProperty(domNode, 'oninput-value');
+		const onSelectValue = _mountOptions.nodeApi.getProperty(domNode, 'select-value');
 
 		if (onSelectValue && domValue !== onSelectValue) {
 			domNode.value = onSelectValue;
 			if (domNode.value === onSelectValue) {
-				_mountOptions.nodeApi.setProperty(domNode, 'select-value', undefined, {} as any);
+				_mountOptions.nodeApi.setProperty(domNode, 'select-value', undefined);
 			}
 		} else if ((onInputValue && domValue === onInputValue) || propValue !== previousValue) {
-			_mountOptions.nodeApi.setProperty(domNode, 'value', propValue, {} as any);
-			_mountOptions.nodeApi.setProperty(domNode, 'oninput-value', undefined, {} as any);
+			_mountOptions.nodeApi.setProperty(domNode, 'value', propValue);
+			_mountOptions.nodeApi.setProperty(domNode, 'oninput-value', undefined);
 		}
 	}
 
@@ -1697,10 +1671,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 		const propNames = Object.keys(properties);
 		const propCount = propNames.length;
 		if (propNames.indexOf('classes') === -1 && currentProperties.classes) {
-			_mountOptions.nodeApi.removeAttribute(domNode, 'class', {
-				ownerDocument: _mountOptions.ownerDocument,
-				properties
-			});
+			_mountOptions.nodeApi.removeAttribute(domNode, 'class');
 		}
 
 		includesEventsAndAttributes && removeOrphanedEvents(domNode, currentProperties, properties);
@@ -1722,15 +1693,9 @@ export function renderer(renderer: () => RenderResult): Renderer {
 								}
 							}
 						}
-						_mountOptions.nodeApi.setAttribute(domNode, 'class', currentClassString, {
-							ownerDocument: _mountOptions.ownerDocument,
-							properties
-						});
+						_mountOptions.nodeApi.setAttribute(domNode, 'class', currentClassString);
 					} else {
-						_mountOptions.nodeApi.removeAttribute(domNode, 'class', {
-							ownerDocument: _mountOptions.ownerDocument,
-							properties
-						});
+						_mountOptions.nodeApi.removeAttribute(domNode, 'class');
 					}
 				}
 			} else if (nodeOperations.indexOf(propName) !== -1) {
@@ -1745,7 +1710,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 					if (newStyleValue === oldStyleValue) {
 						continue;
 					}
-					_mountOptions.nodeApi.setStyle(domNode, styleName, newStyleValue || '', {} as any);
+					_mountOptions.nodeApi.setStyle(domNode, styleName, newStyleValue || '');
 				}
 			} else {
 				if (!propValue && typeof previousValue === 'string') {
@@ -1753,10 +1718,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 				}
 				if (propName === 'value') {
 					if ((domNode as HTMLElement).tagName === 'SELECT') {
-						_mountOptions.nodeApi.setProperty(domNode, 'select-value', propValue, {
-							ownerDocument: _mountOptions.ownerDocument,
-							properties
-						});
+						_mountOptions.nodeApi.setProperty(domNode, 'select-value', propValue);
 					}
 					setValue(domNode, propValue, previousValue);
 				} else if (propName !== 'key') {
@@ -1774,16 +1736,10 @@ export function renderer(renderer: () => RenderResult): Renderer {
 							updateAttribute(domNode, propName, propValue, nextWrapper.namespace);
 						} else if (propName === 'scrollLeft' || propName === 'scrollTop') {
 							if ((domNode as any)[propName] !== propValue) {
-								_mountOptions.nodeApi.setProperty(domNode, propName, propValue, {
-									ownerDocument: _mountOptions.ownerDocument,
-									properties
-								});
+								_mountOptions.nodeApi.setProperty(domNode, propName, propValue);
 							}
 						} else {
-							_mountOptions.nodeApi.setProperty(domNode, propName, propValue, {
-								ownerDocument: _mountOptions.ownerDocument,
-								properties
-							});
+							_mountOptions.nodeApi.setProperty(domNode, propName, propValue);
 						}
 					}
 				}
@@ -2054,7 +2010,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 					} else if (_insertBeforeMap) {
 						insertBefore = _insertBeforeMap.get(next);
 					}
-					_mountOptions.nodeApi.insertBefore(parentDomNode as any, domNode as any, insertBefore, {} as any);
+					_mountOptions.nodeApi.insertBefore(parentDomNode as any, domNode as any, insertBefore);
 					if (isDomVNode(next.node) && next.node.onAttach) {
 						next.node.onAttach();
 					}
@@ -2085,9 +2041,9 @@ export function renderer(renderer: () => RenderResult): Renderer {
 					current: { domNode: currentDomNode }
 				} = item;
 				if (isTextNode(domNode) && isTextNode(currentDomNode) && domNode !== currentDomNode) {
-					const parent = _mountOptions.nodeApi.getParent(currentDomNode, {} as any);
+					const parent = _mountOptions.nodeApi.getParent(currentDomNode);
 					if (parent) {
-						_mountOptions.nodeApi.replaceChild(parent, domNode, currentDomNode, {} as any);
+						_mountOptions.nodeApi.replaceChild(parent, domNode, currentDomNode);
 					}
 				} else {
 					const previousProperties = buildPreviousProperties(domNode, current);
@@ -2638,10 +2594,7 @@ export function renderer(renderer: () => RenderResult): Renderer {
 						next.domNode = global.document.createElementNS(next.namespace, next.node.tag);
 						/*next.domNode = _mountOptions.nodeApi.create(next.node.tag, namespace, { properties: next.node.properties, ownerDocument: _mountOptions.ownerDocument });*/
 					} else {
-						next.domNode = _mountOptions.nodeApi.create(next.node.tag, {
-							properties: next.node.properties,
-							ownerDocument: _mountOptions.ownerDocument
-						});
+						next.domNode = _mountOptions.nodeApi.create(next.node.tag);
 					}
 				} else if (next.node.text != null) {
 					next.domNode = global.document.createTextNode(next.node.text);
@@ -2782,9 +2735,9 @@ export function renderer(renderer: () => RenderResult): Renderer {
 						if (isWNodeWrapper(wrapper) || isVirtualWrapper(wrapper)) {
 							specialIds.push(wrapper.id);
 						} else if (wrapper.domNode && wrapper.domNode.parentNode) {
-							const parent = _mountOptions.nodeApi.getParent(wrapper.domNode, {} as any);
+							const parent = _mountOptions.nodeApi.getParent(wrapper.domNode);
 							if (parent) {
-								_mountOptions.nodeApi.removeChild(parent, wrapper.domNode, {} as any);
+								_mountOptions.nodeApi.removeChild(parent, wrapper.domNode);
 							}
 						}
 					} else if (isDomVNode(wrapper.node) && wrapper.node.onDetach) {
